@@ -1,0 +1,13 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6  # For file uploads
+
+# Google Cloud Speech-to-Text
+google-cloud-speech==2.21.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Optional: For local testing
+pydub==0.25.1  # Audio file manipulation
