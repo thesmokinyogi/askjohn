@@ -43,13 +43,22 @@ Follow the prompts. This will take a few minutes.
 brew install python@3.12
 ```
 
-**Step 3: Verify**
+**Step 3: Install ffmpeg** (required for audio conversion)
 
 ```bash
-python3 --version
+brew install ffmpeg
 ```
 
-Should show: `Python 3.12.x`
+This is required for converting MP3/M4A files to WAV format.
+
+**Step 4: Verify**
+
+```bash
+python3.12 --version
+ffmpeg -version
+```
+
+Should show: `Python 3.12.x` and ffmpeg version info.
 
 ---
 
@@ -116,8 +125,10 @@ cd ~/Documents/askjohn/voice-to-text
 This keeps your Python packages isolated (good practice):
 
 ```bash
-python3 -m venv venv
+python3.12 -m venv venv
 ```
+
+**Important:** Use `python3.12` (not `python3`) to ensure correct version.
 
 This creates a `venv` folder.
 
@@ -200,6 +211,7 @@ You should see a nice purple interface with "Voice-to-Text" title!
 - On Mac: Open QuickTime Player
 - File → New Audio Recording
 - Record yourself saying: "Hello, this is a test. Downward facing dog, warrior two, sun salutation."
+- **Keep it under 60 seconds** (current limitation of synchronous API)
 - File → Save
 - Save as test-audio.m4a
 
@@ -262,7 +274,14 @@ Go back to Google Cloud Console and verify Speech-to-Text API is enabled.
 Check file format and size:
 - Supported: MP3, WAV, M4A, OGG, FLAC
 - Max size: 10MB
+- **Max duration: 60 seconds** (longer files need async API - not yet implemented)
 - Try a shorter file first
+
+### "Audio too long" or timeout errors
+
+Current limitation: Audio files must be under 60 seconds due to Google's synchronous API.
+
+For longer recordings, we'll need to implement the long-running API (future enhancement).
 
 ---
 

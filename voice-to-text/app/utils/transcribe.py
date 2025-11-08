@@ -3,11 +3,21 @@ Modular transcription service.
 
 This module handles audio transcription using Google Speech-to-Text.
 Designed to be swappable - could replace with Whisper, AssemblyAI, etc.
+
+IMPORTANT DEPENDENCIES:
+- ffmpeg must be installed for audio conversion (brew install ffmpeg)
+- pydub requires ffmpeg to convert MP3/M4A to WAV
+
+LIMITATIONS:
+- Current implementation uses synchronous API (max 60 seconds audio)
+- For longer audio, need to implement long_running_recognize
 """
 
 from typing import Dict, Optional
 from google.cloud import speech
 import io
+from pydub import AudioSegment
+import tempfile
 
 
 class TranscriptionService:
@@ -52,6 +62,47 @@ class GoogleSTTService(TranscriptionService):
             "cobra pose", "bhujangasana", "upward dog", "urdhva mukha svanasana"
         ]
 
+    def _convert_to_wav(self, audio_bytes: bytes, source_format: str) -> tuple[bytes, int]:
+        """
+        Convert audio to WAV format for Google STT.
+
+        REQUIRES: ffmpeg installed on system (brew install ffmpeg)
+        pydub uses ffmpeg under the hood for audio conversion.
+
+        Args:
+            audio_bytes: Original audio bytes
+            source_format: Source format (mp3, m4a, etc.)
+
+        Returns:
+            Tuple of (wav_bytes, sample_rate)
+        """
+        try:
+            # Load audio using pydub
+            audio = AudioSegment.from_file(
+                io.BytesIO(audio_bytes),
+                format=source_format
+            )
+
+            # Convert to mono if stereo (Google prefers mono)
+            if audio.channels > 1:
+                audio = audio.set_channels(1)
+
+            # Export as WAV
+            wav_io = io.BytesIO()
+            audio.export(
+                wav_io,
+                format="wav",
+                parameters=["-ac", "1"]  # Force mono
+            )
+
+            wav_bytes = wav_io.getvalue()
+            sample_rate = audio.frame_rate
+
+            return wav_bytes, sample_rate
+
+        except Exception as e:
+            raise Exception(f"Audio conversion failed: {str(e)}")
+
     def transcribe(self, audio_bytes: bytes, audio_format: str = "mp3") -> Dict:
         """
         Transcribe audio using Google Speech-to-Text.
@@ -68,23 +119,37 @@ class GoogleSTTService(TranscriptionService):
                 - metadata: Processing information
         """
 
-        # Map file formats to Google encoding types
-        # Note: Google STT doesn't support MP3/M4A directly - use ENCODING_UNSPECIFIED for auto-detection
-        encoding_map = {
-            "mp3": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
-            "wav": speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            "m4a": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
-            "mp4": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
-            "mov": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
-            "ogg": speech.RecognitionConfig.AudioEncoding.OGG_OPUS,
-            "flac": speech.RecognitionConfig.AudioEncoding.FLAC,
-        }
+        # Formats that need conversion to WAV
+        needs_conversion = ["mp3", "m4a", "mp4", "mov", "aac"]
 
-        encoding = encoding_map.get(audio_format.lower(), speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED)
+        # Convert to WAV if needed (Google STT works best with WAV/FLAC)
+        if audio_format.lower() in needs_conversion:
+            try:
+                audio_bytes, sample_rate = self._convert_to_wav(audio_bytes, audio_format.lower())
+                encoding = speech.RecognitionConfig.AudioEncoding.LINEAR16
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Audio conversion failed: {str(e)}",
+                    "transcript": "",
+                    "confidence": 0.0,
+                    "words": [],
+                    "metadata": {"error_type": "conversion_error"}
+                }
+        else:
+            # Direct format support
+            encoding_map = {
+                "wav": speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                "ogg": speech.RecognitionConfig.AudioEncoding.OGG_OPUS,
+                "flac": speech.RecognitionConfig.AudioEncoding.FLAC,
+            }
+            encoding = encoding_map.get(audio_format.lower(), speech.RecognitionConfig.AudioEncoding.LINEAR16)
+            sample_rate = 16000  # Default for WAV, will be overridden by actual file
 
         # Configure recognition
         config = speech.RecognitionConfig(
             encoding=encoding,
+            sample_rate_hertz=sample_rate,
             language_code="en-US",
 
             # Enable useful features
@@ -109,7 +174,9 @@ class GoogleSTTService(TranscriptionService):
         audio = speech.RecognitionAudio(content=audio_bytes)
 
         # Perform transcription
-        # Note: This is synchronous. For long audio (>60 sec), use long_running_recognize
+        # LIMITATION: Synchronous API has ~60 second limit
+        # For longer audio, must use long_running_recognize (not yet implemented)
+        # See: https://cloud.google.com/speech-to-text/docs/async-recognize
         try:
             response = self.client.recognize(config=config, audio=audio)
         except Exception as e:
