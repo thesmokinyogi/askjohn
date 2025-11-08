@@ -69,15 +69,18 @@ class GoogleSTTService(TranscriptionService):
         """
 
         # Map file formats to Google encoding types
+        # Note: Google STT doesn't support MP3/M4A directly - use ENCODING_UNSPECIFIED for auto-detection
         encoding_map = {
-            "mp3": speech.RecognitionConfig.AudioEncoding.MP3,
+            "mp3": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
             "wav": speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            "m4a": speech.RecognitionConfig.AudioEncoding.MP3,  # Often works
+            "m4a": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
+            "mp4": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
+            "mov": speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,  # Auto-detect
             "ogg": speech.RecognitionConfig.AudioEncoding.OGG_OPUS,
             "flac": speech.RecognitionConfig.AudioEncoding.FLAC,
         }
 
-        encoding = encoding_map.get(audio_format.lower(), speech.RecognitionConfig.AudioEncoding.MP3)
+        encoding = encoding_map.get(audio_format.lower(), speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED)
 
         # Configure recognition
         config = speech.RecognitionConfig(
