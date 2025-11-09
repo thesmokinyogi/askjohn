@@ -40,45 +40,54 @@ if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
 # Get configuration from environment
-STT_API_VERSION = os.getenv("STT_API_VERSION", "v2")
-STT_MODEL = os.getenv("STT_MODEL", "long")
+STT_PROVIDER = os.getenv("STT_PROVIDER", "google")
+
+# Provider-specific configuration
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "long")  # Renamed from STT_MODEL
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 
-# Initialize services based on API version
-if STT_API_VERSION == "v2":
+# Initialize services based on provider
+if STT_PROVIDER == "google":
+    # Validate Google-specific requirements
     if not GCS_BUCKET_NAME:
-        raise ValueError("GCS_BUCKET_NAME must be set in .env for V2 API")
+        raise ValueError("GCS_BUCKET_NAME must be set in .env when using Google provider")
     if not GOOGLE_CLOUD_PROJECT:
-        raise ValueError("GOOGLE_CLOUD_PROJECT must be set in .env for V2 API")
+        raise ValueError("GOOGLE_CLOUD_PROJECT must be set in .env when using Google provider")
 
-    # Initialize V2 services
+    # Initialize Google V2 services
     storage_service = CloudStorageService(
         bucket_name=GCS_BUCKET_NAME,
         project_id=GOOGLE_CLOUD_PROJECT
     )
     transcription_service = get_transcription_service_v2(
         project_id=GOOGLE_CLOUD_PROJECT,
-        model=STT_MODEL
+        model=GOOGLE_MODEL
     )
 
-    logger.info(f"Initialized V2 services: model={STT_MODEL}, bucket={GCS_BUCKET_NAME}")
+    logger.info(f"Initialized Google provider: model={GOOGLE_MODEL}, bucket={GCS_BUCKET_NAME}")
+
+elif STT_PROVIDER == "whisper":
+    # Whisper provider (not yet implemented)
+    raise NotImplementedError(
+        "Whisper provider not yet implemented. "
+        "Set STT_PROVIDER=google in .env to use Google Speech-to-Text."
+    )
 
 else:
-    # V1 fallback (for testing)
-    from app.services.transcribe_v1 import get_transcription_service
-    transcription_service = get_transcription_service("google")
-    storage_service = None
-    logger.info("Initialized V1 service (synchronous, max 60 seconds)")
+    raise ValueError(
+        f"Unknown STT_PROVIDER: {STT_PROVIDER}. "
+        f"Supported providers: google, whisper (whisper not yet implemented)"
+    )
 
 
 @app.on_event("startup")
 async def startup_event():
     """Verify services on startup."""
-    logger.info(f"Starting Voice-to-Text Service (API: {STT_API_VERSION})")
+    logger.info(f"Starting Voice-to-Text Service (Provider: {STT_PROVIDER})")
 
-    if STT_API_VERSION == "v2":
-        # Verify bucket access
+    if STT_PROVIDER == "google":
+        # Verify bucket access for Google provider
         if not storage_service.verify_bucket_access():
             logger.error(f"Cannot access GCS bucket: {GCS_BUCKET_NAME}")
             logger.error("Please verify bucket exists and credentials are correct")
@@ -96,25 +105,35 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {
+    health_info = {
         "status": "healthy",
         "service": "voice-to-text",
-        "api_version": STT_API_VERSION,
-        "model": STT_MODEL if STT_API_VERSION == "v2" else "video",
-        "bucket": GCS_BUCKET_NAME if STT_API_VERSION == "v2" else None
+        "provider": STT_PROVIDER,
     }
+
+    # Add provider-specific info
+    if STT_PROVIDER == "google":
+        health_info.update({
+            "model": GOOGLE_MODEL,
+            "bucket": GCS_BUCKET_NAME,
+            "api": "v2_batch"
+        })
+
+    return health_info
 
 
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """
-    Transcribe uploaded audio file.
+    Transcribe uploaded audio file using configured provider.
 
-    V2 API:
+    Current provider: Google Speech-to-Text V2 Batch API
     - Supports any audio length (up to 8 hours)
     - Uploads to Cloud Storage temporarily
     - Uses batch recognition
     - Better accuracy with Chirp models
+
+    Future: Whisper, AssemblyAI, Deepgram support
 
     Accepts: mp3, wav, m4a, ogg, flac, mp4, mov
     Returns: Transcript with confidence score and word-level details
@@ -140,8 +159,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
             detail=f"Error reading file: {str(e)}"
         )
 
-    # Validate file size (500MB for V2, 10MB for V1)
-    max_size_mb = 500 if STT_API_VERSION == "v2" else 10
+    # Validate file size (provider-specific)
+    max_size_mb = 500 if STT_PROVIDER == "google" else 10
     if len(audio_bytes) > max_size_mb * 1024 * 1024:
         raise HTTPException(
             status_code=400,
@@ -150,8 +169,9 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     logger.info(f"Processing file: {file.filename} ({len(audio_bytes)} bytes)")
 
-    # V2 API: Upload to GCS, transcribe, cleanup
-    if STT_API_VERSION == "v2":
+    # Route to provider-specific transcription
+    if STT_PROVIDER == "google":
+        # Google: Upload to GCS, batch transcribe, cleanup
         gcs_uri = None
         try:
             # Upload to Cloud Storage
@@ -176,8 +196,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 detail=f"Transcription error: {str(e)}"
             )
 
-    # V1 API: Direct transcription
-    else:
+    elif STT_PROVIDER == "whisper":
+        # Whisper: Direct transcription (when implemented)
         try:
             result = transcription_service.transcribe(audio_bytes, file_extension)
         except Exception as e:
@@ -186,6 +206,12 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 status_code=500,
                 detail=f"Transcription error: {str(e)}"
             )
+
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Provider {STT_PROVIDER} not properly configured"
+        )
 
     # Check if transcription was successful
     if not result.get("success", False):
@@ -203,7 +229,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
         "transcript": result["transcript"],
         "confidence": result["confidence"],
         "word_count": result["metadata"].get("total_words", 0),
-        "api_version": STT_API_VERSION,
+        "provider": STT_PROVIDER,
         "model": result["metadata"].get("model", "unknown"),
         "details": {
             "words": result["words"],  # Word-level timestamps and confidence
@@ -218,14 +244,22 @@ async def get_config():
     Get current configuration.
     Useful for debugging.
     """
-    return {
-        "api_version": STT_API_VERSION,
-        "model": STT_MODEL if STT_API_VERSION == "v2" else "video",
-        "gcs_bucket": GCS_BUCKET_NAME if STT_API_VERSION == "v2" else None,
-        "google_credentials_configured": "GOOGLE_APPLICATION_CREDENTIALS" in os.environ,
-        "max_file_size_mb": 500 if STT_API_VERSION == "v2" else 10,
+    config = {
+        "provider": STT_PROVIDER,
+        "max_file_size_mb": 500 if STT_PROVIDER == "google" else 10,
         "supported_formats": ["mp3", "wav", "m4a", "ogg", "flac", "mp4", "mov"]
     }
+
+    # Add provider-specific config
+    if STT_PROVIDER == "google":
+        config.update({
+            "model": GOOGLE_MODEL,
+            "gcs_bucket": GCS_BUCKET_NAME,
+            "google_credentials_configured": "GOOGLE_APPLICATION_CREDENTIALS" in os.environ,
+            "api": "v2_batch"
+        })
+
+    return config
 
 
 if __name__ == "__main__":
