@@ -1,7 +1,8 @@
 """
 Voice-to-Text Web Application
 
-Simple FastAPI app for transcribing audio files using Google Speech-to-Text.
+FastAPI app for transcribing audio files using Google Speech-to-Text.
+Supports both V1 (synchronous, <60 sec) and V2 (batch, any length).
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -9,18 +10,28 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import os
+import logging
 from dotenv import load_dotenv
 
-from app.utils.transcribe import get_transcription_service
+# Import services
+from app.services.transcribe_v2 import get_transcription_service_v2
+from app.services.storage import CloudStorageService
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Voice-to-Text Transcription Service",
-    description="Upload audio files and get text transcriptions",
-    version="1.0.0"
+    description="Upload audio files and get text transcriptions using Google Speech-to-Text V2",
+    version="2.0.0"
 )
 
 # Mount static files (for serving the HTML UI)
@@ -28,10 +39,49 @@ static_path = Path(__file__).parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-# Initialize transcription service
-# Can swap "google" for "whisper" here when ready
-STT_PROVIDER = os.getenv("STT_PROVIDER", "google")
-transcription_service = get_transcription_service(STT_PROVIDER)
+# Get configuration from environment
+STT_API_VERSION = os.getenv("STT_API_VERSION", "v2")
+STT_MODEL = os.getenv("STT_MODEL", "long")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+
+# Initialize services based on API version
+if STT_API_VERSION == "v2":
+    if not GCS_BUCKET_NAME:
+        raise ValueError("GCS_BUCKET_NAME must be set in .env for V2 API")
+    if not GOOGLE_CLOUD_PROJECT:
+        raise ValueError("GOOGLE_CLOUD_PROJECT must be set in .env for V2 API")
+
+    # Initialize V2 services
+    storage_service = CloudStorageService(
+        bucket_name=GCS_BUCKET_NAME,
+        project_id=GOOGLE_CLOUD_PROJECT
+    )
+    transcription_service = get_transcription_service_v2(
+        project_id=GOOGLE_CLOUD_PROJECT,
+        model=STT_MODEL
+    )
+
+    logger.info(f"Initialized V2 services: model={STT_MODEL}, bucket={GCS_BUCKET_NAME}")
+
+else:
+    # V1 fallback (for testing)
+    from app.services.transcribe_v1 import get_transcription_service
+    transcription_service = get_transcription_service("google")
+    storage_service = None
+    logger.info("Initialized V1 service (synchronous, max 60 seconds)")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Verify services on startup."""
+    logger.info(f"Starting Voice-to-Text Service (API: {STT_API_VERSION})")
+
+    if STT_API_VERSION == "v2":
+        # Verify bucket access
+        if not storage_service.verify_bucket_access():
+            logger.error(f"Cannot access GCS bucket: {GCS_BUCKET_NAME}")
+            logger.error("Please verify bucket exists and credentials are correct")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -49,7 +99,9 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "voice-to-text",
-        "provider": STT_PROVIDER
+        "api_version": STT_API_VERSION,
+        "model": STT_MODEL if STT_API_VERSION == "v2" else "video",
+        "bucket": GCS_BUCKET_NAME if STT_API_VERSION == "v2" else None
     }
 
 
@@ -58,7 +110,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
     """
     Transcribe uploaded audio file.
 
-    Accepts: mp3, wav, m4a, ogg, flac
+    V2 API:
+    - Supports any audio length (up to 8 hours)
+    - Uploads to Cloud Storage temporarily
+    - Uses batch recognition
+    - Better accuracy with Chirp models
+
+    Accepts: mp3, wav, m4a, ogg, flac, mp4, mov
     Returns: Transcript with confidence score and word-level details
     """
 
@@ -76,27 +134,58 @@ async def transcribe_audio(file: UploadFile = File(...)):
     try:
         audio_bytes = await file.read()
     except Exception as e:
+        logger.error(f"Error reading file: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Error reading file: {str(e)}"
         )
 
-    # Validate file size (max 10MB for now)
-    max_size_mb = 10
+    # Validate file size (500MB for V2, 10MB for V1)
+    max_size_mb = 500 if STT_API_VERSION == "v2" else 10
     if len(audio_bytes) > max_size_mb * 1024 * 1024:
         raise HTTPException(
             status_code=400,
             detail=f"File too large. Maximum size: {max_size_mb}MB"
         )
 
-    # Transcribe
-    try:
-        result = transcription_service.transcribe(audio_bytes, file_extension)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Transcription error: {str(e)}"
-        )
+    logger.info(f"Processing file: {file.filename} ({len(audio_bytes)} bytes)")
+
+    # V2 API: Upload to GCS, transcribe, cleanup
+    if STT_API_VERSION == "v2":
+        gcs_uri = None
+        try:
+            # Upload to Cloud Storage
+            logger.info("Uploading to Cloud Storage...")
+            gcs_uri = storage_service.upload_audio(audio_bytes, file.filename)
+
+            # Transcribe from Cloud Storage
+            logger.info("Starting batch transcription...")
+            result = transcription_service.transcribe(gcs_uri)
+
+            # Clean up uploaded file
+            logger.info("Cleaning up temporary file...")
+            storage_service.delete_file(gcs_uri)
+
+        except Exception as e:
+            logger.error(f"Transcription error: {e}")
+            # Clean up on error
+            if gcs_uri:
+                storage_service.delete_file(gcs_uri)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transcription error: {str(e)}"
+            )
+
+    # V1 API: Direct transcription
+    else:
+        try:
+            result = transcription_service.transcribe(audio_bytes, file_extension)
+        except Exception as e:
+            logger.error(f"Transcription error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Transcription error: {str(e)}"
+            )
 
     # Check if transcription was successful
     if not result.get("success", False):
@@ -105,6 +194,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
             detail=result.get("error", "Unknown transcription error")
         )
 
+    logger.info(f"Transcription complete: {result['metadata'].get('total_words', 0)} words")
+
     # Return result
     return JSONResponse(content={
         "success": True,
@@ -112,6 +203,8 @@ async def transcribe_audio(file: UploadFile = File(...)):
         "transcript": result["transcript"],
         "confidence": result["confidence"],
         "word_count": result["metadata"].get("total_words", 0),
+        "api_version": STT_API_VERSION,
+        "model": result["metadata"].get("model", "unknown"),
         "details": {
             "words": result["words"],  # Word-level timestamps and confidence
             "metadata": result["metadata"]
@@ -126,9 +219,11 @@ async def get_config():
     Useful for debugging.
     """
     return {
-        "stt_provider": STT_PROVIDER,
+        "api_version": STT_API_VERSION,
+        "model": STT_MODEL if STT_API_VERSION == "v2" else "video",
+        "gcs_bucket": GCS_BUCKET_NAME if STT_API_VERSION == "v2" else None,
         "google_credentials_configured": "GOOGLE_APPLICATION_CREDENTIALS" in os.environ,
-        "max_file_size_mb": 10,
+        "max_file_size_mb": 500 if STT_API_VERSION == "v2" else 10,
         "supported_formats": ["mp3", "wav", "m4a", "ogg", "flac", "mp4", "mov"]
     }
 
