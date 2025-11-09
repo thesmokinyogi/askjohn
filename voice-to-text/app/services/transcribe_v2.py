@@ -165,6 +165,13 @@ class GoogleSpeechV2Service:
             Structured dict with transcript and metadata
         """
         try:
+            # DEBUG: Log response structure
+            logger.info(f"Response type: {type(response)}")
+            logger.info(f"Response has results: {hasattr(response, 'results')}")
+            if hasattr(response, 'results'):
+                logger.info(f"Results type: {type(response.results)}")
+                logger.info(f"Results length: {len(response.results) if response.results else 0}")
+
             # Extract results from response
             # V2 response structure is different from V1
             results = []
@@ -173,6 +180,9 @@ class GoogleSpeechV2Service:
 
             # Iterate through results
             for result in response.results.values():
+                logger.info(f"Result type: {type(result)}")
+                logger.info(f"Result has transcript: {hasattr(result, 'transcript')}")
+
                 for batch_result in result.transcript.results:
                     if batch_result.alternatives:
                         alternative = batch_result.alternatives[0]
