@@ -131,7 +131,14 @@ This document defines **how we work together** on this project. For **what we're
 
 ### Explanation Density Levels
 
-**Current target:** Level 2 (Standard)
+**Current target:** Level 3 (Brief)
+
+**Learning Curve Rule:**
+- **First time explaining a pattern:** Level 1-2 (establish understanding)
+- **Second time:** Level 3 (brief reminder)
+- **Third time+:** Level 4 (silent - pattern established)
+
+**Example:** Edit vs Write explained fully once → brief mention next time → no explanation after that
 
 | Level | When to Use | Token Budget | Example |
 |-------|-------------|--------------|---------|
@@ -141,8 +148,9 @@ This document defines **how we work together** on this project. For **what we're
 | **4. Silent** | Obvious choices, established patterns, no alternatives | 0 tokens | Just do it |
 
 **Adjust based on:**
-- ⬆️ **Increase detail:** User asks "why?", novel situation, high stakes
-- ⬇️ **Decrease detail:** User says "too much", established pattern, time pressure
+- ⬆️ **Increase detail:** User asks "why?", novel situation, high stakes, first time explaining pattern
+- ⬇️ **Decrease detail:** User says "too much", established pattern, already explained this before
+- **Default:** Brief (Level 3) unless situation requires more
 
 ---
 
@@ -221,6 +229,8 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 
 **Current default:** Edit (safer, incremental)
 **Better for architecture:** Write (cleaner, holistic)
+
+**Note:** Edit vs Write pattern already explained - no need to repeat rationale in future
 
 ---
 
@@ -315,6 +325,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2025-11-09 | Initial working agreement |
+| 1.1 | 2025-11-09 | Updated default to Level 3 (Brief), added learning curve rule |
 
 ---
 
