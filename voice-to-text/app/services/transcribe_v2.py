@@ -130,10 +130,12 @@ class GoogleSpeechV2Service:
         # Build model name based on selection
         model_name = f"projects/{self.project_id}/locations/global/models/{self.model}"
 
-        # Create phrase set for yoga vocabulary
-        phrase_hints = cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
-            phrases=[{"value": phrase, "boost": 15} for phrase in self.yoga_vocabulary]
-        )
+        # TODO: Fix phrase hints syntax for V2 API
+        # V2 has different syntax than V1 for custom vocabulary
+        # Temporarily disabled to get transcription working
+        # phrase_hints = cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
+        #     phrases=[{"value": phrase, "boost": 15} for phrase in self.yoga_vocabulary]
+        # )
 
         config = cloud_speech.RecognitionConfig(
             auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
@@ -144,9 +146,10 @@ class GoogleSpeechV2Service:
                 enable_word_time_offsets=True,
                 enable_word_confidence=True,
             ),
-            adaptation=cloud_speech.SpeechAdaptation(
-                phrase_sets=[phrase_hints]
-            ),
+            # TODO: Re-enable after fixing phrase hints syntax
+            # adaptation=cloud_speech.SpeechAdaptation(
+            #     phrase_sets=[phrase_hints]
+            # ),
         )
 
         return config
