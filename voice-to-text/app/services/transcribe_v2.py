@@ -127,8 +127,9 @@ class GoogleSpeechV2Service:
         Returns:
             RecognitionConfig object
         """
-        # Build model name based on selection
-        model_name = f"projects/{self.project_id}/locations/global/models/{self.model}"
+        # V2 API uses simple model names like "long", "short", "chirp_3"
+        # Not full resource paths
+        logger.info(f"Building config with model: {self.model}")
 
         # TODO: Fix phrase hints syntax for V2 API
         # V2 has different syntax than V1 for custom vocabulary
@@ -140,7 +141,7 @@ class GoogleSpeechV2Service:
         config = cloud_speech.RecognitionConfig(
             auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
             language_codes=[language_code],
-            model=model_name,
+            model=self.model,  # Use model name directly, not resource path
             features=cloud_speech.RecognitionFeatures(
                 enable_automatic_punctuation=True,
                 enable_word_time_offsets=True,
@@ -168,9 +169,15 @@ class GoogleSpeechV2Service:
             # DEBUG: Log response structure
             logger.info(f"Response type: {type(response)}")
             logger.info(f"Response has results: {hasattr(response, 'results')}")
+
+            # Check for response-level metadata/errors
+            if hasattr(response, 'total_billed_duration'):
+                logger.info(f"Total billed duration: {response.total_billed_duration}")
+
             if hasattr(response, 'results'):
                 logger.info(f"Results type: {type(response.results)}")
                 logger.info(f"Results length: {len(response.results) if response.results else 0}")
+                logger.info(f"Results keys: {list(response.results.keys()) if response.results else []}")
 
             # Extract results from response
             # V2 response structure is different from V1
@@ -178,30 +185,51 @@ class GoogleSpeechV2Service:
             total_confidence = 0.0
             word_details = []
 
-            # Iterate through results
-            for result in response.results.values():
+            # Iterate through results (keyed by GCS URI)
+            for uri, result in response.results.items():
+                logger.info(f"Processing URI: {uri}")
                 logger.info(f"Result type: {type(result)}")
                 logger.info(f"Result has transcript: {hasattr(result, 'transcript')}")
 
-                for batch_result in result.transcript.results:
-                    if batch_result.alternatives:
-                        alternative = batch_result.alternatives[0]
+                # Check for errors in this file's result
+                if hasattr(result, 'error'):
+                    logger.error(f"Error in result for {uri}: {result.error}")
+                    continue
 
-                        results.append(alternative.transcript)
-                        total_confidence += alternative.confidence
+                if hasattr(result, 'metadata'):
+                    logger.info(f"Result metadata: {result.metadata}")
 
-                        # Extract word-level details
-                        for word_info in alternative.words:
-                            word_details.append({
-                                "word": word_info.word,
-                                "start_time": word_info.start_offset.total_seconds(),
-                                "end_time": word_info.end_offset.total_seconds(),
-                                "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
-                            })
+                # Parse transcript if present
+                if hasattr(result, 'transcript') and result.transcript:
+                    logger.info(f"Transcript type: {type(result.transcript)}")
+                    logger.info(f"Transcript has results: {hasattr(result.transcript, 'results')}")
+
+                    if hasattr(result.transcript, 'results'):
+                        logger.info(f"Transcript results count: {len(result.transcript.results)}")
+
+                        for batch_result in result.transcript.results:
+                            if batch_result.alternatives:
+                                alternative = batch_result.alternatives[0]
+
+                                results.append(alternative.transcript)
+                                total_confidence += alternative.confidence
+
+                                # Extract word-level details
+                                for word_info in alternative.words:
+                                    word_details.append({
+                                        "word": word_info.word,
+                                        "start_time": word_info.start_offset.total_seconds(),
+                                        "end_time": word_info.end_offset.total_seconds(),
+                                        "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
+                                    })
+                else:
+                    logger.warning(f"No transcript found in result for {uri}")
 
             # Combine results
             full_transcript = " ".join(results)
             avg_confidence = total_confidence / len(results) if results else 0.0
+
+            logger.info(f"Parsed {len(results)} result segments, {len(word_details)} words")
 
             return {
                 "success": True,
@@ -217,7 +245,7 @@ class GoogleSpeechV2Service:
             }
 
         except Exception as e:
-            logger.error(f"Error parsing results: {e}")
+            logger.error(f"Error parsing results: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": f"Result parsing error: {str(e)}",
