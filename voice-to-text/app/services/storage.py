@@ -11,10 +11,12 @@ Required for V2 batch recognition.
 """
 
 from google.cloud import storage
-from typing import Optional
+from typing import Optional, Dict, Tuple
 import os
+import tempfile
 from datetime import datetime, timedelta
 import logging
+from pydub.utils import mediainfo
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +46,52 @@ class CloudStorageService:
 
         logger.info(f"Initialized Cloud Storage service: bucket={bucket_name}")
 
-    def upload_audio(self, audio_bytes: bytes, filename: str) -> str:
+    def upload_audio(self, audio_bytes: bytes, filename: str) -> Tuple[str, Dict]:
         """
-        Upload audio file to Cloud Storage.
+        Upload audio file to Cloud Storage and extract audio metadata.
 
         Args:
             audio_bytes: Audio file content
             filename: Original filename (for extension/metadata)
 
         Returns:
-            GCS URI (gs://bucket-name/path/to/file.ext)
+            Tuple of (GCS URI, audio metadata dict)
+            Metadata includes: sample_rate, channels, duration, codec
         """
+        # Extract audio metadata before upload
+        # Write to temp file for pydub to read
+        metadata = {}
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
+            temp_file.write(audio_bytes)
+            temp_path = temp_file.name
+
+        try:
+            info = mediainfo(temp_path)
+            metadata = {
+                'sample_rate': int(info.get('sample_rate', 0)),
+                'channels': int(info.get('channels', 0)),
+                'duration': float(info.get('duration', 0)),
+                'codec': info.get('codec_name', 'unknown'),
+                'bit_rate': info.get('bit_rate', 'unknown')
+            }
+            logger.info(f"Audio metadata: {metadata['sample_rate']}Hz, {metadata['channels']} channels, {metadata['duration']:.1f}s")
+        except Exception as e:
+            logger.warning(f"Could not extract audio metadata: {e}")
+            # Provide defaults if extraction fails
+            metadata = {
+                'sample_rate': 16000,  # Fallback to optimal speech rate
+                'channels': 1,         # Fallback to mono
+                'duration': 0,
+                'codec': 'unknown',
+                'bit_rate': 'unknown'
+            }
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+
         # Sanitize filename - replace spaces and special chars with underscores
         # Keep only alphanumeric, dots, hyphens, underscores
         import re
@@ -86,7 +123,7 @@ class CloudStorageService:
 
         logger.info(f"Uploaded audio to GCS: {gcs_uri} ({len(audio_bytes)} bytes)")
 
-        return gcs_uri
+        return gcs_uri, metadata
 
     def delete_file(self, gcs_uri: str) -> bool:
         """

@@ -174,13 +174,13 @@ async def transcribe_audio(file: UploadFile = File(...)):
         # Google: Upload to GCS, batch transcribe, cleanup
         gcs_uri = None
         try:
-            # Upload to Cloud Storage
+            # Upload to Cloud Storage and extract metadata
             logger.info("Uploading to Cloud Storage...")
-            gcs_uri = storage_service.upload_audio(audio_bytes, file.filename)
+            gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
 
-            # Transcribe from Cloud Storage
+            # Transcribe from Cloud Storage with actual audio metadata
             logger.info("Starting batch transcription...")
-            result = transcription_service.transcribe(gcs_uri)
+            result = transcription_service.transcribe(gcs_uri, audio_metadata=audio_metadata)
 
             # Clean up uploaded file
             logger.info("Cleaning up temporary file...")

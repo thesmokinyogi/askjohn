@@ -97,13 +97,14 @@ class GoogleSpeechV2Service:
 
         logger.info(f"Initialized Speech V2 service: model={model}, project={project_id}")
 
-    def transcribe(self, gcs_uri: str, language_code: str = "en-US") -> Dict:
+    def transcribe(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None) -> Dict:
         """
         Transcribe audio file from Cloud Storage using batch recognition.
 
         Args:
             gcs_uri: Google Cloud Storage URI (gs://bucket/path/file.ext)
             language_code: Language code (default: en-US)
+            audio_metadata: Audio file metadata (sample_rate, channels, etc.)
 
         Returns:
             Dict with transcript, confidence, words, and metadata
@@ -112,8 +113,8 @@ class GoogleSpeechV2Service:
             # Extract file extension from URI for format-specific config
             file_extension = gcs_uri.split('.')[-1].lower() if '.' in gcs_uri else None
 
-            # Configure recognition
-            config = self._build_config(language_code, audio_encoding=file_extension)
+            # Configure recognition with actual audio metadata
+            config = self._build_config(language_code, audio_encoding=file_extension, audio_metadata=audio_metadata)
 
             # Create recognition request
             file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
@@ -151,7 +152,7 @@ class GoogleSpeechV2Service:
                 "metadata": {"error_type": "transcription_error"}
             }
 
-    def _build_config(self, language_code: str, audio_encoding: str = None) -> cloud_speech.RecognitionConfig:
+    def _build_config(self, language_code: str, audio_encoding: str = None, audio_metadata: Optional[Dict] = None) -> cloud_speech.RecognitionConfig:
         """
         Build recognition configuration with optimal settings.
 
@@ -159,6 +160,8 @@ class GoogleSpeechV2Service:
             language_code: Language for recognition
             audio_encoding: Audio file extension (e.g., 'm4a', 'mp3', 'wav').
                           Determines whether to use auto-detect or explicit decoding.
+            audio_metadata: Actual audio file metadata (sample_rate, channels).
+                          If provided, uses actual values instead of defaults.
 
         Returns:
             RecognitionConfig object
@@ -172,20 +175,28 @@ class GoogleSpeechV2Service:
         if encoding_lower in self.EXPLICIT_ENCODING_MAP:
             # Format requires explicit encoding configuration
             audio_encoding_value = self.EXPLICIT_ENCODING_MAP[encoding_lower]
+
+            # Use actual audio metadata if available, otherwise use sensible defaults
+            if audio_metadata:
+                sample_rate = audio_metadata.get('sample_rate', 16000)
+                channels = audio_metadata.get('channels', 1)
+                logger.info(f"Using actual audio specs: {sample_rate}Hz, {channels} channel(s)")
+            else:
+                # Fallback defaults if metadata extraction failed
+                sample_rate = 16000  # Optimal for speech
+                channels = 1         # Mono typical for voice
+                logger.warning("No audio metadata available, using defaults: 16kHz mono")
+
             decoding_config_kwargs = {
                 'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
                     encoding=audio_encoding_value,
-                    # Sensible defaults for speech audio
-                    # API accepts 8000-48000 Hz; 16000 is optimal for speech
-                    sample_rate_hertz=16000,
-                    # 1 = mono (typical for voice recordings)
-                    # If stereo, Google will auto-mix to mono
-                    audio_channel_count=1
+                    sample_rate_hertz=sample_rate,
+                    audio_channel_count=channels
                 )
             }
             # Handle both enum objects (with .name) and integers (without)
             encoding_name = getattr(audio_encoding_value, 'name', audio_encoding_value)
-            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {encoding_name}, 16kHz mono)")
+            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {encoding_name}, {sample_rate}Hz, {channels}ch)")
 
         elif encoding_lower in self.AUTO_DETECT_FORMATS:
             # Format supported by auto-detect
