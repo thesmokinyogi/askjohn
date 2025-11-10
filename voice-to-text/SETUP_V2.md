@@ -7,7 +7,7 @@
 - ✅ **Better accuracy** - Chirp 3 and Long Audio models
 - ✅ **Larger files** - Up to 500MB (vs 10MB in V1)
 - ✅ **Better features** - Speaker diarization ready, automatic punctuation
-- ✅ **Yoga vocabulary** - Custom hints for Sanskrit terms and pose names
+- ⚠️ **Yoga vocabulary** - Temporarily disabled (V2 syntax different from V1, needs fixing)
 
 **New Requirements:**
 - Google Cloud Storage bucket (for temporary audio storage)
@@ -54,6 +54,42 @@ gsutil ls
 
 ---
 
+### Step 1B: Grant Service Account Permissions
+
+**CRITICAL:** Your service account needs proper permissions to access both Speech-to-Text V2 and Cloud Storage.
+
+**Find your service account email:**
+
+1. Go to: https://console.cloud.google.com/iam-admin/serviceaccounts
+2. Select your project
+3. Find your service account (example: `id-name-voice-to-text-service@voice-to-text-dev-477522.iam.gserviceaccount.com`)
+4. Note the full email address
+
+**Grant required roles:**
+
+1. Go to: https://console.cloud.google.com/iam-admin/iam
+2. Click **"Grant Access"**
+3. In "New principals" field, paste your service account email
+4. Click **"Select a role"** and add BOTH:
+   - **Cloud Speech Administrator** (required for V2 API - V1's "Cloud Speech Client" is insufficient)
+   - **Storage Admin** (required for bucket access)
+5. Click **"Save"**
+
+**Why these specific roles:**
+- **Cloud Speech Administrator**: V2 API requires elevated permissions compared to V1
+- **Storage Admin**: Service account needs to upload files to bucket and delete them after processing
+
+**Verify permissions:**
+```bash
+gcloud projects get-iam-policy voice-to-text-dev-477522 \
+    --flatten="bindings[].members" \
+    --filter="bindings.members:serviceAccount:YOUR-SERVICE-ACCOUNT-EMAIL"
+```
+
+You should see both `roles/speech.admin` and `roles/storage.admin` listed.
+
+---
+
 ### Step 2: Update Your .env File
 
 Add the new V2 configuration to your `.env` file:
@@ -63,32 +99,62 @@ Add the new V2 configuration to your `.env` file:
 open -a TextEdit ~/Documents/GitHub/askjohn/voice-to-text/.env
 ```
 
-**Update to look like this:**
+**Before editing, find your actual values:**
+
+**1. Find your credentials file name:**
+
+Google generates specific filenames when you download service account keys. They look like:
+- `voice-to-text-dev-477522-eacae7e41318.json`
+- Format: `project-name-project-number-hash.json`
+
+```bash
+# List all credential files in your credentials folder
+ls ~/Documents/GitHub/credentials/*.json
+```
+
+Copy the FULL filename you see (including the path).
+
+**2. Find your actual project ID:**
+
+Your project ID includes a numeric suffix. Don't guess - get it exactly:
+
+```bash
+# List all your projects
+gcloud projects list
+
+# Or check the credentials file
+cat ~/Documents/GitHub/credentials/YOUR-FILE-NAME.json | grep project_id
+```
+
+The project ID will look like: `voice-to-text-dev-477522` (not just `voice-to-text-dev`)
+
+**Now update your .env file to look like this:**
 
 ```bash
 # Voice-to-Text Configuration
 
-# STT API Version (v1 or v2)
-STT_API_VERSION=v2
+# STRATEGIC: Which transcription provider to use
+STT_PROVIDER=google
 
-# Google Cloud Configuration
-GOOGLE_APPLICATION_CREDENTIALS=/Users/johncarosella/Documents/GitHub/credentials/google-cloud-key.json
-
-# Google Cloud Project ID (from your GCP project)
-GOOGLE_CLOUD_PROJECT=voice-to-text-dev
-
-# Cloud Storage Bucket (the one you just created)
+# TACTICAL: Google-specific configuration
+GOOGLE_APPLICATION_CREDENTIALS=/Users/johncarosella/Documents/GitHub/credentials/voice-to-text-dev-477522-eacae7e41318.json
+GOOGLE_CLOUD_PROJECT=voice-to-text-dev-477522
 GCS_BUCKET_NAME=voice-to-text-audio-jc
+GOOGLE_MODEL=long
 
-# STT Model Selection
-# Options: chirp_3 (best, $0.064/min), long (recommended, $0.024/min), short ($0.024/min)
-STT_MODEL=long
+# Model options: chirp_3 (best, $0.064/min), long (recommended, $0.024/min), short ($0.024/min)
 ```
 
-**Important:**
-- Replace `voice-to-text-audio-jc` with YOUR actual bucket name
-- Replace `voice-to-text-dev` with YOUR actual project ID (if different)
-- Keep the credentials path as is (unless you moved the file)
+**Important - use YOUR actual values:**
+- `GOOGLE_APPLICATION_CREDENTIALS`: Use the EXACT filename from step 1 above
+- `GOOGLE_CLOUD_PROJECT`: Use the project ID with numeric suffix from step 2
+- `GCS_BUCKET_NAME`: Use the bucket name you created in Step 1
+- `GOOGLE_MODEL`: Start with `long` (good balance of cost/quality)
+
+**Common mistakes:**
+- ❌ Using `google-cloud-key.json` (generic name, not your actual file)
+- ❌ Using `voice-to-text-dev` without the `-477522` suffix
+- ❌ Project ID not matching what's in your credentials file
 
 ---
 
@@ -142,16 +208,19 @@ python -m app.main
 **What you should see:**
 
 ```
-INFO:app.main:Initialized V2 services: model=long, bucket=voice-to-text-audio-jc
-INFO:app.main:Starting Voice-to-Text Service (API: v2)
+INFO:app.main:Initialized Google provider: model=long, bucket=voice-to-text-audio-jc
+INFO:app.main:Starting Voice-to-Text Service (Provider: google)
 INFO:app.services.storage:Verified access to bucket: voice-to-text-audio-jc
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
 **If you see errors:**
-- `ValueError: GCS_BUCKET_NAME must be set` → Check .env file
-- `Cannot access bucket` → Verify bucket exists and credentials are correct
-- `Module not found` → Run `pip install -r requirements.txt`
+- `ValueError: GCS_BUCKET_NAME must be set` → Check .env file has correct bucket name
+- `ValueError: STT_PROVIDER must be set` → Add `STT_PROVIDER=google` to .env
+- `Cannot access bucket` → Check Step 1B - verify IAM permissions granted
+- `Module not found: google.cloud.storage` → Run `pip install -r requirements.txt`
+- `DefaultCredentialsError` → Check credentials file path and filename in .env
+- `PermissionDenied` → Verify service account has both Cloud Speech Administrator AND Storage Admin roles
 
 ---
 
@@ -217,14 +286,27 @@ The code has a 10-minute timeout. If your audio is very long or Google is slow:
 2. Try shorter audio first to verify it works
 3. Check server logs for specific errors
 
-### Want to switch back to V1 for testing?
+### Permission Issues Checklist
 
-In .env, change:
-```bash
-STT_API_VERSION=v1
-```
+If you're getting permission errors, verify ALL of these:
 
-Restart server. V1 works for audio <60 seconds without Cloud Storage.
+1. **Service account has correct roles** (Step 1B):
+   - Cloud Speech Administrator (not just Client)
+   - Storage Admin
+
+2. **Credentials file path is correct** in .env:
+   - File actually exists at that path
+   - Filename matches exactly (including project number and hash)
+
+3. **Project ID matches** credentials file:
+   ```bash
+   cat ~/Documents/GitHub/credentials/YOUR-FILE.json | grep project_id
+   ```
+
+4. **Bucket exists** and is in same project:
+   ```bash
+   gsutil ls gs://your-bucket-name
+   ```
 
 ---
 
@@ -243,7 +325,7 @@ https://console.cloud.google.com/billing
 
 In .env:
 ```bash
-STT_MODEL=chirp_3
+GOOGLE_MODEL=chirp_3
 ```
 
 Cost becomes ~$73/month.
