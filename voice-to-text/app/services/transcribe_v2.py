@@ -174,12 +174,18 @@ class GoogleSpeechV2Service:
             audio_encoding_value = self.EXPLICIT_ENCODING_MAP[encoding_lower]
             decoding_config_kwargs = {
                 'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
-                    encoding=audio_encoding_value
+                    encoding=audio_encoding_value,
+                    # Sensible defaults for speech audio
+                    # API accepts 8000-48000 Hz; 16000 is optimal for speech
+                    sample_rate_hertz=16000,
+                    # 1 = mono (typical for voice recordings)
+                    # If stereo, Google will auto-mix to mono
+                    audio_channel_count=1
                 )
             }
             # Handle both enum objects (with .name) and integers (without)
             encoding_name = getattr(audio_encoding_value, 'name', audio_encoding_value)
-            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {encoding_name})")
+            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {encoding_name}, 16kHz mono)")
 
         elif encoding_lower in self.AUTO_DETECT_FORMATS:
             # Format supported by auto-detect
