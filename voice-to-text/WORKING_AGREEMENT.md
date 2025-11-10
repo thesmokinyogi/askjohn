@@ -81,6 +81,53 @@ This document defines **how we work together** on this project. For **what we're
 
 ---
 
+### 6. Root Cause Over Band-Aids
+**Principle:** Fix the underlying problem, not the symptom. Resist "outcome theater."
+
+**The Pattern:**
+Band-aids seem efficient (small, fast, local fixes) but:
+- Create technical debt that compounds
+- Lead to systems nobody fully understands
+- Make future changes harder (navigating around hacks)
+- Result in "except when..." edge cases
+- Feel productive but hollow ("I hope this holds together")
+
+Root cause fixes feel slower initially but:
+- Create solid foundations
+- Make future work faster
+- Build comprehensible systems
+- Reduce cognitive load
+- Feel like craftsmanship
+
+**Practice:**
+- When hitting a problem, ask: "What's the real issue here?"
+- Reject solutions that only work "for now" or "for testing"
+- If proposing a tactical fix, explicitly call it out and justify why
+- Distinguish: "This is temporary scaffolding" vs "This is the wrong approach"
+- Value: Sustainable velocity > Speed to demo
+
+**Examples:**
+- ✗ Client-side duration detection (browser dependency, won't work in Content Cockpit)
+- ✓ Server-side AudioMetadataService (works everywhere, proper abstraction)
+- ✗ "Let's just get it working so we can test" (defers problems)
+- ✓ "Let's build it right" (takes 15 more minutes, saves hours later)
+
+**Warning Signs:**
+- "This will work for now"
+- "We can fix it properly later"
+- "Just to say we did it"
+- Anxious feeling about whether it will hold together
+- Accumulating "except when" conditions
+
+**Test:**
+- Does this solution work regardless of how files arrive (UI, API, batch, Content Cockpit)?
+- Would I be proud to show this code in 6 months?
+- Is this craftsmanship or outcome theater?
+
+**Meta-lesson:** Pause and reflect instead of plowing forward. The pause is where wisdom lives. Discipline is faster than hacking over the lifetime of the system.
+
+---
+
 ## Decision-Making Checklists
 
 ### Before Implementing Anything
@@ -381,6 +428,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 | 1.1 | 2025-11-09 | Updated default to Level 3 (Brief), added learning curve rule |
 | 1.2 | 2025-11-09 | Added "Before Implementing New APIs/Libraries" checklist - be thorough with documentation first |
 | 1.3 | 2025-11-10 | Added "When Debugging Repeated Failures" - search strategy for "X not working" vs "how to do X" |
+| 1.4 | 2025-11-10 | Added "Root Cause Over Band-Aids" principle - fix underlying problems, resist outcome theater, value craftsmanship |
 
 ---
 
