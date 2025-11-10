@@ -297,6 +297,56 @@
             100% { transform: rotate(360deg); }
         }
 
+        /* Job Status */
+        .job-status {
+            display: none;
+            background: #e0e7ff;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .job-status.active { display: block; }
+
+        .job-status-header {
+            font-size: 18px;
+            font-weight: 600;
+            color: #4338ca;
+            margin-bottom: 10px;
+        }
+
+        .job-id {
+            font-family: monospace;
+            font-size: 11px;
+            color: #666;
+            background: white;
+            padding: 8px 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+
+        .job-status-message {
+            color: #4338ca;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        .btn-secondary {
+            background: #4338ca;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover { background: #3730a3; }
+        .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+
         /* Results */
         .results {
             display: none;
@@ -384,7 +434,12 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎙️ Voice-to-Text</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h1 style="margin: 0;">🎙️ Voice-to-Text</h1>
+            <a href="/jobs" style="font-size: 14px; color: #667eea; text-decoration: none; font-weight: 600;">
+                📋 View All Jobs
+            </a>
+        </div>
         <p class="subtitle">75% cost savings with Dynamic Batch processing</p>
 
         <!-- Budget Display -->
@@ -456,7 +511,19 @@
         <!-- Loading -->
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Transcribing audio... This may take a moment.</p>
+            <p>Submitting transcription job...</p>
+        </div>
+
+        <!-- Job Status -->
+        <div class="job-status" id="jobStatus">
+            <div class="job-status-header">✓ Job Submitted</div>
+            <div class="job-id" id="jobId"></div>
+            <div class="job-status-message" id="jobMessage">
+                Checking status...
+            </div>
+            <button class="btn-secondary" id="checkStatusBtn" onclick="checkJobStatus()">
+                Check Status Now
+            </button>
         </div>
 
         <!-- Error -->
@@ -497,6 +564,8 @@
         let pricingData = null;
         let budgetData = null;
         let fileDurationMinutes = 0;
+        let currentJobId = null; // Track current transcription job
+        let pollingInterval = null; // For auto-polling
 
         // DOM elements
         const uploadArea = document.getElementById('uploadArea');
@@ -758,15 +827,22 @@
             }
         }
 
-        // Transcribe audio
+        // Transcribe audio - NEW JOB-BASED FLOW
         async function transcribeAudio() {
             if (!selectedFile) return;
 
             // Reset UI
             error.classList.remove('active');
             results.classList.remove('active');
+            document.getElementById('jobStatus').classList.remove('active');
             loading.classList.add('active');
             transcribeBtn.disabled = true;
+
+            // Stop any existing polling
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
 
             // Create form data
             const formData = new FormData();
@@ -774,6 +850,7 @@
             formData.append('model', selectedModel);
 
             try {
+                // Submit job (returns immediately with job_id)
                 const response = await fetch('/transcribe', {
                     method: 'POST',
                     body: formData
@@ -782,20 +859,125 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.detail || 'Transcription failed');
+                    throw new Error(data.detail || 'Job submission failed');
                 }
 
-                // Display results
-                displayResults(data);
+                // Job submitted successfully!
+                // data contains: job_id, status, filename, model, estimated_cost
+                currentJobId = data.job_id;
 
-                // Reload budget
-                await loadBudget();
+                // Hide loading, show job status
+                loading.classList.remove('active');
+                displayJobStatus(data);
+
+                // Start polling for completion
+                startPolling();
 
             } catch (err) {
                 showError(err.message);
-            } finally {
                 loading.classList.remove('active');
                 transcribeBtn.disabled = false;
+            }
+        }
+
+        // Display job submission confirmation
+        function displayJobStatus(jobData) {
+            const jobStatus = document.getElementById('jobStatus');
+            const jobId = document.getElementById('jobId');
+            const jobMessage = document.getElementById('jobMessage');
+
+            // Show job ID (truncated for display)
+            const shortId = jobData.job_id.split('/').pop(); // Get last part
+            jobId.textContent = `Job ID: ${shortId}`;
+            jobId.title = jobData.job_id; // Full ID on hover
+
+            // Show initial message
+            jobMessage.innerHTML = `
+                <strong>Status:</strong> ${jobData.status}<br>
+                <strong>File:</strong> ${jobData.filename}<br>
+                <strong>Model:</strong> ${jobData.model}<br>
+                <strong>Estimated Cost:</strong> $${jobData.estimated_cost.toFixed(2)}<br>
+                <br>
+                <em>Checking status automatically every 5 seconds...</em>
+            `;
+
+            jobStatus.classList.add('active');
+        }
+
+        // Start polling for job completion
+        function startPolling() {
+            // Check immediately
+            checkJobStatus();
+
+            // Then check every 5 seconds
+            pollingInterval = setInterval(() => {
+                checkJobStatus();
+            }, 5000); // 5 seconds
+        }
+
+        // Check job status
+        async function checkJobStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(currentJobId)}/status`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Status check failed');
+                }
+
+                // Update status message
+                updateJobStatusMessage(data);
+
+                // If job is complete, stop polling and show results
+                if (data.status === 'complete') {
+                    stopPolling();
+                    displayResults(data);
+                    await loadBudget(); // Reload budget
+                }
+
+                // If job failed, stop polling and show error
+                if (data.status === 'failed') {
+                    stopPolling();
+                    showError(data.error || 'Transcription failed');
+                    document.getElementById('jobStatus').classList.remove('active');
+                }
+
+            } catch (err) {
+                console.error('Error checking status:', err);
+                // Don't stop polling on network errors - job might still be processing
+            }
+        }
+
+        // Update job status message
+        function updateJobStatusMessage(data) {
+            const jobMessage = document.getElementById('jobMessage');
+
+            if (data.status === 'processing') {
+                jobMessage.innerHTML = `
+                    <strong>Status:</strong> 🔄 Processing<br>
+                    <strong>File:</strong> ${data.filename}<br>
+                    <strong>Model:</strong> ${data.model}<br>
+                    <br>
+                    <em>Transcription in progress... Checking every 5 seconds.</em><br>
+                    <em style="font-size: 12px; color: #666;">
+                        ${data.model.includes('batch') ? 'Batch jobs can take a few minutes. Please be patient!' : 'Should complete soon!'}
+                    </em>
+                `;
+            } else if (data.status === 'complete') {
+                jobMessage.innerHTML = `
+                    <strong>Status:</strong> ✓ Complete!<br>
+                    <em>Displaying results below...</em>
+                `;
+            }
+        }
+
+        // Stop polling
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
             }
         }
 
@@ -804,10 +986,10 @@
             results.classList.add('active');
 
             // Transcript
-            document.getElementById('transcript').textContent = data.transcript;
+            document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
 
             // Confidence
-            const confidence = Math.round(data.confidence * 100);
+            const confidence = Math.round((data.confidence || 0) * 100);
             const confidenceEl = document.getElementById('confidence');
             confidenceEl.textContent = `${confidence}% confident`;
 
@@ -820,11 +1002,20 @@
             }
 
             // Stats
-            document.getElementById('wordCount').textContent = data.word_count;
+            // Count words from transcript
+            const wordCount = data.transcript ? data.transcript.split(/\s+/).filter(w => w.length > 0).length : 0;
+            document.getElementById('wordCount').textContent = wordCount;
+
+            // Duration - from file metadata we stored earlier
             document.getElementById('duration').textContent =
-                `${Math.round(data.cost.duration_minutes)} min`;
+                `${Math.round(fileDurationMinutes)} min`;
+
+            // Actual cost
             document.getElementById('actualCost').textContent =
-                `$${data.cost.total_cost.toFixed(2)}`;
+                `$${(data.actual_cost || 0).toFixed(2)}`;
+
+            // Re-enable transcribe button for new uploads
+            transcribeBtn.disabled = false;
         }
 
         // Show error

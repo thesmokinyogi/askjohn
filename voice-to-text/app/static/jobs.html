@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcription Jobs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 { font-size: 28px; }
+
+        .btn-link {
+            font-size: 14px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-link:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        /* Stats Banner */
+        .stats-banner {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        /* Filter Tabs */
+        .filters {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            border: 2px solid #e5e7eb;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        /* Jobs List */
+        .jobs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .job-card {
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 20px;
+            background: white;
+            transition: all 0.2s;
+        }
+
+        .job-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+        }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .job-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .job-meta {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-complete {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-processing {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-queued {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+
+        .status-failed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .job-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+            padding: 15px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+
+        .detail-item {
+            text-align: center;
+        }
+
+        .detail-label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+
+        .detail-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .transcript-preview {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 12px;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            max-height: 150px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .transcript-preview.active {
+            display: block;
+        }
+
+        .job-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: #667eea;
+            transition: all 0.2s;
+        }
+
+        .btn-small:hover {
+            background: #f8f9ff;
+            border-color: #667eea;
+        }
+
+        .btn-small:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fee2e2;
+            border: 2px solid #fecaca;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📋 Transcription Jobs</h1>
+            <a href="/" class="btn-link">← Back to Upload</a>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-banner" id="statsBanner">
+            <div class="stat-item">
+                <div class="stat-label">Total Jobs</div>
+                <div class="stat-value" id="totalJobs">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Complete</div>
+                <div class="stat-value" id="completeJobs">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Processing</div>
+                <div class="stat-value" id="processingJobs">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Total Cost</div>
+                <div class="stat-value" id="totalCost">$0.00</div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters">
+            <button class="filter-btn active" onclick="filterJobs('all')">All</button>
+            <button class="filter-btn" onclick="filterJobs('complete')">Complete</button>
+            <button class="filter-btn" onclick="filterJobs('processing')">Processing</button>
+            <button class="filter-btn" onclick="filterJobs('queued')">Queued</button>
+            <button class="filter-btn" onclick="filterJobs('failed')">Failed</button>
+            <button class="filter-btn" onclick="loadJobs()" style="margin-left: auto;">🔄 Refresh</button>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Loading jobs...</p>
+        </div>
+
+        <!-- Error -->
+        <div class="error" id="error" style="display: none;"></div>
+
+        <!-- Jobs List -->
+        <div class="jobs-list" id="jobsList"></div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <div class="empty-icon">📭</div>
+            <h2>No jobs yet</h2>
+            <p>Upload an audio file to create your first transcription job.</p>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let allJobs = [];
+        let currentFilter = 'all';
+        let autoRefreshInterval = null;
+
+        // Initialize
+        async function init() {
+            await loadJobs();
+            startAutoRefresh();
+        }
+
+        // Load jobs from API
+        async function loadJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to load jobs');
+                }
+
+                allJobs = data.jobs;
+
+                // Update stats
+                updateStats(data.stats);
+
+                // Render jobs
+                renderJobs();
+
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+
+            } catch (err) {
+                console.error('Error loading jobs:', err);
+                showError(err.message);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Update stats banner
+        function updateStats(stats) {
+            document.getElementById('totalJobs').textContent = stats.total_jobs || 0;
+            document.getElementById('completeJobs').textContent = stats.by_status?.complete || 0;
+            document.getElementById('processingJobs').textContent =
+                (stats.by_status?.processing || 0) + (stats.by_status?.queued || 0);
+            document.getElementById('totalCost').textContent =
+                `$${(stats.total_cost || 0).toFixed(2)}`;
+        }
+
+        // Filter jobs
+        function filterJobs(status) {
+            currentFilter = status;
+
+            // Update active filter button
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+
+            // Re-render jobs
+            renderJobs();
+        }
+
+        // Render jobs list
+        function renderJobs() {
+            const jobsList = document.getElementById('jobsList');
+            const emptyState = document.getElementById('emptyState');
+
+            // Filter jobs based on current filter
+            let filteredJobs = allJobs;
+            if (currentFilter !== 'all') {
+                filteredJobs = allJobs.filter(job => job.status === currentFilter);
+            }
+
+            // Show empty state if no jobs
+            if (filteredJobs.length === 0) {
+                jobsList.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            // Hide empty state
+            emptyState.style.display = 'none';
+
+            // Render each job
+            jobsList.innerHTML = filteredJobs.map(job => renderJobCard(job)).join('');
+        }
+
+        // Render a single job card
+        function renderJobCard(job) {
+            const statusClass = `status-${job.status}`;
+            const submittedDate = new Date(job.submitted_at).toLocaleString();
+            const shortId = job.job_id.split('/').pop();
+
+            // Format model name
+            const modelDisplay = job.model
+                .replace('_', ' ')
+                .split(' ')
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ');
+
+            return `
+                <div class="job-card" data-job-id="${job.job_id}">
+                    <div class="job-header">
+                        <div>
+                            <div class="job-title">${job.filename}</div>
+                            <div class="job-meta">
+                                Submitted: ${submittedDate}<br>
+                                Job ID: ${shortId}
+                            </div>
+                        </div>
+                        <div class="status-badge ${statusClass}">
+                            ${job.status}
+                        </div>
+                    </div>
+
+                    <div class="job-details">
+                        <div class="detail-item">
+                            <div class="detail-label">Model</div>
+                            <div class="detail-value">${modelDisplay}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Duration</div>
+                            <div class="detail-value">${Math.round(job.duration_minutes || 0)} min</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Cost</div>
+                            <div class="detail-value">$${(job.estimated_cost || 0).toFixed(2)}</div>
+                        </div>
+                        ${job.confidence ? `
+                        <div class="detail-item">
+                            <div class="detail-label">Confidence</div>
+                            <div class="detail-value">${Math.round(job.confidence * 100)}%</div>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    ${job.transcript ? `
+                    <div class="transcript-preview" id="transcript-${shortId}">
+                        ${job.transcript}
+                    </div>
+                    ` : ''}
+
+                    ${job.error ? `
+                    <div class="error" style="display: block; margin-top: 12px;">
+                        <strong>Error:</strong> ${job.error}
+                    </div>
+                    ` : ''}
+
+                    <div class="job-actions">
+                        ${job.transcript ? `
+                        <button class="btn-small" onclick="toggleTranscript('${shortId}')">
+                            📄 View Transcript
+                        </button>
+                        ` : ''}
+                        ${job.status === 'processing' || job.status === 'queued' ? `
+                        <button class="btn-small" onclick="checkStatus('${job.job_id}')">
+                            🔄 Check Status
+                        </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Toggle transcript visibility
+        function toggleTranscript(shortId) {
+            const transcriptEl = document.getElementById(`transcript-${shortId}`);
+            transcriptEl.classList.toggle('active');
+
+            // Update button text
+            const btn = event.currentTarget;
+            if (transcriptEl.classList.contains('active')) {
+                btn.textContent = '▲ Hide Transcript';
+            } else {
+                btn.textContent = '📄 View Transcript';
+            }
+        }
+
+        // Check status for a specific job
+        async function checkStatus(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/status`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Status check failed');
+                }
+
+                // If status changed, reload all jobs
+                if (data.status === 'complete' || data.status === 'failed') {
+                    await loadJobs();
+                } else {
+                    // Just show a message
+                    alert(`Status: ${data.status}\n${data.message || ''}`);
+                }
+
+            } catch (err) {
+                alert(`Error checking status: ${err.message}`);
+            }
+        }
+
+        // Auto-refresh every 10 seconds
+        function startAutoRefresh() {
+            autoRefreshInterval = setInterval(() => {
+                // Only refresh if there are processing/queued jobs
+                const hasActiveJobs = allJobs.some(job =>
+                    job.status === 'processing' || job.status === 'queued'
+                );
+
+                if (hasActiveJobs) {
+                    loadJobs();
+                }
+            }, 10000); // 10 seconds
+        }
+
+        // Show error
+        function showError(message) {
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = `Error: ${message}`;
+            errorEl.style.display = 'block';
+        }
+
+        // Initialize on load
+        init();
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

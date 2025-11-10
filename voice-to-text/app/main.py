@@ -127,6 +127,15 @@ async def root():
     return "<h1>Voice-to-Text API</h1><p>UI not found. Visit /docs for API documentation.</p>"
 
 
+@app.get("/jobs", response_class=HTMLResponse)
+async def jobs_page():
+    """Serve the jobs list page."""
+    html_file = static_path / "jobs.html"
+    if html_file.exists():
+        return html_file.read_text()
+    return "<h1>Jobs Page Not Found</h1><p><a href='/'>Back to Home</a></p>"
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
