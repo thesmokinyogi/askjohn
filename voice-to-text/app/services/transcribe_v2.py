@@ -176,22 +176,30 @@ class GoogleSpeechV2Service:
             # Format requires explicit encoding configuration
             audio_encoding_value = self.EXPLICIT_ENCODING_MAP[encoding_lower]
 
-            # For container formats (M4A, MP4, MOV), try OMITTING sample_rate/channels
-            # Let Google read metadata from the container itself
-            # Providing explicit values might cause conflicts with embedded metadata
-            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding only, no sample_rate/channels)")
-            logger.info("Rationale: Container formats have embedded metadata - let Google read it")
+            # ExplicitDecodingConfig REQUIRES sample_rate and channels
+            # Omitting them causes protobuf to use 0, which is "out of range"
+            # Use actual audio metadata (extracted via pydub in storage.py)
+            if audio_metadata:
+                sample_rate = audio_metadata.get('sample_rate', 16000)
+                channels = audio_metadata.get('channels', 1)
+                logger.info(f"Using actual audio metadata: {sample_rate}Hz, {channels} channel(s)")
+            else:
+                # This should not happen (we extract metadata in storage.py)
+                # But provide fallback just in case
+                sample_rate = 16000
+                channels = 1
+                logger.error("BUG: No audio metadata provided! Using fallback defaults.")
 
             decoding_config_kwargs = {
                 'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
-                    encoding=audio_encoding_value
-                    # OMIT sample_rate_hertz and audio_channel_count
-                    # Let Google read from M4A container metadata
+                    encoding=audio_encoding_value,
+                    sample_rate_hertz=sample_rate,
+                    audio_channel_count=channels
                 )
             }
             # Handle both enum objects (with .name) and integers (without)
             encoding_name = getattr(audio_encoding_value, 'name', audio_encoding_value)
-            logger.info(f"ExplicitDecodingConfig created: encoding={encoding_name}")
+            logger.info(f"ExplicitDecodingConfig: encoding={encoding_name}, sample_rate={sample_rate}Hz, channels={channels}")
 
         elif encoding_lower in self.AUTO_DETECT_FORMATS:
             # Format supported by auto-detect
