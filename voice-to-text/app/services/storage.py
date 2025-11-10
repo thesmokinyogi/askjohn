@@ -64,7 +64,13 @@ class CloudStorageService:
 
         # Set content type based on file extension
         content_type = self._get_content_type(filename)
-        blob.upload_from_string(audio_bytes, content_type=content_type)
+
+        # Upload with extended timeout for large files (500MB max @ ~5 Mbps = ~13 min)
+        # Set 15-minute timeout to handle slow connections
+        file_size_mb = len(audio_bytes) / (1024 * 1024)
+        logger.info(f"Uploading {file_size_mb:.1f} MB to GCS...")
+
+        blob.upload_from_string(audio_bytes, content_type=content_type, timeout=900)
 
         # Get GCS URI
         gcs_uri = f"gs://{self.bucket_name}/{blob_name}"
