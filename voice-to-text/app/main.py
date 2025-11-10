@@ -20,6 +20,7 @@ from app.services.storage import CloudStorageService
 from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
 from app.services.jobs import get_job_storage
+from app.services.audio_metadata import get_audio_metadata_service
 
 # Load environment variables from .env file
 load_dotenv()
@@ -645,6 +646,60 @@ async def get_provider_pricing(provider: str):
     except Exception as e:
         logger.error(f"Error getting provider pricing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/detect-duration")
+async def detect_duration(file: UploadFile = File(...)):
+    """
+    Extract audio metadata (duration, format, codec) from uploaded file.
+
+    This is server-side metadata extraction that works regardless of how
+    files arrive (UI, API, batch, Content Cockpit).
+
+    Args:
+        file: Uploaded audio file
+
+    Returns:
+        {
+            "duration": 125.5,  # seconds
+            "duration_minutes": 2.09,  # minutes
+            "format": "mp3",
+            "codec": "mp3",
+            "sample_rate": 44100,
+            "channels": 2,
+            "bit_rate": 128000,
+            "file_size": 1024000,  # bytes
+            "filename": "audio.mp3"
+        }
+    """
+    try:
+        # Read file bytes
+        audio_bytes = await file.read()
+
+        # Get metadata service
+        metadata_service = get_audio_metadata_service()
+
+        # Extract metadata
+        metadata = metadata_service.analyze_bytes(audio_bytes, file.filename)
+
+        # Add duration in minutes for convenience
+        metadata["duration_minutes"] = metadata["duration"] / 60.0
+        metadata["filename"] = file.filename
+
+        logger.info(
+            f"Detected duration for {file.filename}: "
+            f"{metadata['duration_minutes']:.1f} min, "
+            f"{metadata['format']}, {metadata['codec']}"
+        )
+
+        return JSONResponse(content=metadata)
+
+    except Exception as e:
+        logger.error(f"Error detecting duration for {file.filename}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error detecting duration: {str(e)}"
+        )
 
 
 @app.post("/api/estimate-cost")

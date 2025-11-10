@@ -763,34 +763,30 @@
             transcribeBtn.addEventListener('click', transcribeAudio);
         }
 
-        // Detect audio duration using built-in Audio API
+        // Detect audio duration using server-side metadata extraction
         async function detectDuration(file) {
             try {
-                // Create a temporary URL for the audio file
-                const url = URL.createObjectURL(file);
+                // Create form data with the audio file
+                const formData = new FormData();
+                formData.append('file', file);
 
-                // Create an Audio element to read metadata
-                const audio = new Audio();
-
-                // Wait for metadata to load
-                await new Promise((resolve, reject) => {
-                    audio.addEventListener('loadedmetadata', () => {
-                        resolve();
-                    });
-                    audio.addEventListener('error', (e) => {
-                        reject(new Error('Failed to load audio metadata'));
-                    });
-                    audio.src = url;
+                // Call server endpoint to extract metadata
+                const response = await fetch('/api/detect-duration', {
+                    method: 'POST',
+                    body: formData
                 });
 
-                // Get duration in seconds
-                const durationSeconds = audio.duration;
-                fileDurationMinutes = durationSeconds / 60.0;
+                if (!response.ok) {
+                    throw new Error('Failed to detect duration');
+                }
 
-                // Clean up the temporary URL
-                URL.revokeObjectURL(url);
+                const metadata = await response.json();
+
+                // Store duration in minutes
+                fileDurationMinutes = metadata.duration_minutes;
 
                 console.log(`Duration detected: ${fileDurationMinutes.toFixed(1)} minutes`);
+                console.log(`Format: ${metadata.format}, Codec: ${metadata.codec}`);
 
                 // Update cost estimate
                 updateCostEstimate();
