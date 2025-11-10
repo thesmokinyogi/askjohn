@@ -15,8 +15,10 @@ from typing import Optional, Dict, Tuple
 import os
 import tempfile
 from datetime import datetime, timedelta
+from io import BytesIO
 import logging
 from pydub.utils import mediainfo
+from pydub import AudioSegment
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,37 @@ class CloudStorageService:
                 os.unlink(temp_path)
             except:
                 pass
+
+        # Convert M4A to MP3 (M4A has issues with Google Speech batch_recognize)
+        file_extension = os.path.splitext(filename)[1].lower()
+        if file_extension == '.m4a':
+            logger.warning("⚠️  M4A file detected - converting to MP3 for compatibility")
+            try:
+                # Load M4A audio
+                with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as m4a_temp:
+                    m4a_temp.write(audio_bytes)
+                    m4a_path = m4a_temp.name
+
+                # Convert to MP3
+                audio = AudioSegment.from_file(m4a_path, format="m4a")
+                mp3_buffer = BytesIO()
+                audio.export(mp3_buffer, format="mp3", bitrate="128k")
+                audio_bytes = mp3_buffer.getvalue()
+
+                # Update filename to .mp3
+                filename = filename.rsplit('.', 1)[0] + '.mp3'
+
+                logger.info(f"✓ Converted M4A to MP3: {len(audio_bytes)} bytes")
+
+                # Clean up temp M4A file
+                try:
+                    os.unlink(m4a_path)
+                except:
+                    pass
+
+            except Exception as e:
+                logger.error(f"Failed to convert M4A to MP3: {e}")
+                logger.warning("Attempting upload as M4A anyway...")
 
         # Sanitize filename - replace spaces and special chars with underscores
         # Keep only alphanumeric, dots, hyphens, underscores
