@@ -6,7 +6,6 @@ python-multipart==0.0.6  # For file uploads
 # Google Cloud Services
 google-cloud-speech==2.21.0       # Speech-to-Text API
 google-cloud-storage==2.10.0      # Cloud Storage (required for V2 batch)
-google-api-python-client==2.108.0 # Drive API (for AI collaboration)
 
 # Environment variables
 python-dotenv==1.0.0
