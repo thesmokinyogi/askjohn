@@ -1,0 +1,77 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-11-10",
+  "providers": {
+    "google": {
+      "fetch_method": "manual",
+      "free_tier": {
+        "type": "monthly_minutes",
+        "amount": 60,
+        "shared": true
+      },
+      "models": {
+        "chirp_batch": {
+          "display_name": "Chirp (Dynamic Batch)",
+          "cost_per_min": 0.004,
+          "processing_time": "up to 24 hours",
+          "features": ["Best accuracy", "Speaker diarization", "75% savings"],
+          "recommended_for": ["non-urgent high-quality transcription"],
+          "last_verified": "2025-11-10"
+        },
+        "long_batch": {
+          "display_name": "Long Audio (Dynamic Batch)",
+          "cost_per_min": 0.004,
+          "processing_time": "up to 24 hours",
+          "features": ["Optimized for 30+ min recordings", "75% savings"],
+          "recommended_for": ["non-urgent transcription", "yoga classes"],
+          "last_verified": "2025-11-10"
+        },
+        "chirp_standard": {
+          "display_name": "Chirp (Standard)",
+          "cost_per_min": 0.016,
+          "processing_time": "1-3 minutes",
+          "features": ["Best accuracy", "Speaker diarization", "Fast processing"],
+          "recommended_for": ["urgent high-quality transcription"],
+          "last_verified": "2025-11-10"
+        },
+        "long_standard": {
+          "display_name": "Long Audio (Standard)",
+          "cost_per_min": 0.016,
+          "processing_time": "1-3 minutes",
+          "features": ["Optimized for 30+ min recordings", "Fast processing"],
+          "recommended_for": ["urgent transcription", "lectures", "meetings"],
+          "last_verified": "2025-11-10"
+        }
+      }
+    },
+    "whisper": {
+      "fetch_method": "manual",
+      "free_tier": {
+        "type": "dollar_credit",
+        "amount": 5.00,
+        "expires_days": 90,
+        "shared": false
+      },
+      "models": {
+        "whisper_standard": {
+          "display_name": "Whisper API",
+          "cost_per_min": 0.006,
+          "processing_time": "~1 minute",
+          "features": ["Fast processing", "Good accuracy"],
+          "recommended_for": ["general transcription", "cost-effective"],
+          "last_verified": "2025-11-10",
+          "notes": "Check https://openai.com/api/pricing/ for current pricing"
+        },
+        "gpt4o_mini": {
+          "display_name": "GPT-4o Mini Transcribe",
+          "cost_per_min": 0.003,
+          "processing_time": "~1 minute",
+          "features": ["Fastest processing", "Most cost-effective"],
+          "recommended_for": ["high-volume transcription"],
+          "last_verified": "2025-11-10",
+          "notes": "Check https://openai.com/api/pricing/ for current pricing"
+        }
+      }
+    }
+  }
+}

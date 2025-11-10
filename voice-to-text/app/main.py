@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 # Import services
 from app.services.transcribe_v2 import get_transcription_service_v2
 from app.services.storage import CloudStorageService
+from app.services.pricing import get_pricing_service
+from app.services.budget import get_budget_service
 
 # Load environment variables from .env file
 load_dotenv()
@@ -55,10 +57,17 @@ if static_path.exists():
 # Get configuration from environment
 STT_PROVIDER = os.getenv("STT_PROVIDER", "google")
 
+# Budget configuration
+MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET", "250.0"))
+
 # Provider-specific configuration
 GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "long")  # Renamed from STT_MODEL
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+
+# Initialize pricing and budget services
+pricing_service = get_pricing_service()
+budget_service = get_budget_service(monthly_budget=MONTHLY_BUDGET)
 
 # Initialize services based on provider
 if STT_PROVIDER == "google":
@@ -136,7 +145,10 @@ async def health_check():
 
 
 @app.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    model: str = None
+):
     """
     Transcribe uploaded audio file using configured provider.
 
@@ -148,9 +160,17 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     Future: Whisper, AssemblyAI, Deepgram support
 
+    Args:
+        file: Audio file to transcribe
+        model: Model to use (e.g., 'chirp_batch', 'long_standard').
+               Defaults to GOOGLE_MODEL from .env
+
     Accepts: mp3, wav, m4a, ogg, flac, mp4, mov
-    Returns: Transcript with confidence score and word-level details
+    Returns: Transcript with confidence score, word-level details, and cost info
     """
+
+    # Use provided model or fall back to environment variable
+    selected_model = model or GOOGLE_MODEL
 
     # Validate file type
     allowed_extensions = ["mp3", "wav", "m4a", "ogg", "flac", "mp4", "mov"]
@@ -199,9 +219,15 @@ async def transcribe_audio(file: UploadFile = File(...)):
                 logger.info("Uploading to Cloud Storage...")
                 gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
 
+            # Initialize transcription service with selected model
+            model_transcription_service = get_transcription_service_v2(
+                project_id=GOOGLE_CLOUD_PROJECT,
+                model=selected_model
+            )
+
             # Transcribe from Cloud Storage with actual audio metadata
-            logger.info("Starting batch transcription...")
-            result = transcription_service.transcribe(gcs_uri, audio_metadata=audio_metadata)
+            logger.info(f"Starting batch transcription with model: {selected_model}...")
+            result = model_transcription_service.transcribe(gcs_uri, audio_metadata=audio_metadata)
 
             # Clean up uploaded file (skip if in test mode using cached file)
             if not TEST_MODE_SKIP_UPLOAD:
@@ -244,6 +270,36 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     logger.info(f"Transcription complete: {result['metadata'].get('total_words', 0)} words")
 
+    # Calculate cost and record in budget
+    duration_seconds = result["metadata"].get("duration_seconds", 0)
+    duration_minutes = duration_seconds / 60.0
+
+    # Get free tier remaining
+    free_tier_remaining = budget_service.get_free_tier_remaining(STT_PROVIDER)
+
+    # Calculate cost
+    cost_estimate = pricing_service.estimate_cost(
+        provider=STT_PROVIDER,
+        model=selected_model,
+        duration_minutes=duration_minutes,
+        free_tier_remaining=free_tier_remaining
+    )
+
+    # Record transcription in budget
+    budget_service.record_transcription(
+        provider=STT_PROVIDER,
+        model=selected_model,
+        duration_minutes=duration_minutes,
+        cost=cost_estimate["total_cost"],
+        free_minutes_used=cost_estimate["free_minutes_used"],
+        filename=file.filename
+    )
+
+    logger.info(
+        f"Cost: ${cost_estimate['total_cost']:.2f} "
+        f"({cost_estimate['billable_minutes']:.1f} min @ ${cost_estimate['cost_per_minute']}/min)"
+    )
+
     # Return result
     return JSONResponse(content={
         "success": True,
@@ -252,7 +308,14 @@ async def transcribe_audio(file: UploadFile = File(...)):
         "confidence": result["confidence"],
         "word_count": result["metadata"].get("total_words", 0),
         "provider": STT_PROVIDER,
-        "model": result["metadata"].get("model", "unknown"),
+        "model": selected_model,
+        "cost": {
+            "total_cost": cost_estimate["total_cost"],
+            "duration_minutes": duration_minutes,
+            "billable_minutes": cost_estimate["billable_minutes"],
+            "free_minutes_used": cost_estimate["free_minutes_used"],
+            "cost_per_minute": cost_estimate["cost_per_minute"]
+        },
         "details": {
             "words": result["words"],  # Word-level timestamps and confidence
             "metadata": result["metadata"]
@@ -282,6 +345,102 @@ async def get_config():
         })
 
     return config
+
+
+@app.get("/api/budget")
+async def get_budget():
+    """
+    Get current budget summary.
+
+    Returns:
+        Budget summary with usage, remaining budget, free tier info
+    """
+    try:
+        summary = budget_service.get_budget_summary(provider=STT_PROVIDER)
+        return JSONResponse(content=summary)
+    except Exception as e:
+        logger.error(f"Error getting budget summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/pricing")
+async def get_pricing():
+    """
+    Get pricing information for all providers and models.
+
+    Returns:
+        Complete pricing configuration
+    """
+    try:
+        pricing = pricing_service.get_all_pricing()
+        return JSONResponse(content=pricing)
+    except Exception as e:
+        logger.error(f"Error getting pricing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/pricing/{provider}")
+async def get_provider_pricing(provider: str):
+    """
+    Get pricing for specific provider.
+
+    Args:
+        provider: Provider name (e.g., 'google', 'whisper')
+
+    Returns:
+        Provider pricing configuration
+    """
+    try:
+        pricing = pricing_service.get_provider_pricing(provider)
+        return JSONResponse(content=pricing)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting provider pricing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/estimate-cost")
+async def estimate_cost(request: dict):
+    """
+    Estimate cost for a transcription.
+
+    Request body:
+        {
+            "provider": "google",
+            "model": "chirp_batch",
+            "duration_minutes": 75.0
+        }
+
+    Returns:
+        Cost estimate with breakdown
+    """
+    try:
+        provider = request.get("provider", STT_PROVIDER)
+        model = request.get("model", GOOGLE_MODEL)
+        duration_minutes = request.get("duration_minutes", 0)
+
+        if duration_minutes <= 0:
+            raise HTTPException(status_code=400, detail="duration_minutes must be > 0")
+
+        # Get free tier remaining
+        free_tier_remaining = budget_service.get_free_tier_remaining(provider)
+
+        # Calculate estimate
+        estimate = pricing_service.estimate_cost(
+            provider=provider,
+            model=model,
+            duration_minutes=duration_minutes,
+            free_tier_remaining=free_tier_remaining
+        )
+
+        return JSONResponse(content=estimate)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error estimating cost: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
