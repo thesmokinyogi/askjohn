@@ -176,27 +176,22 @@ class GoogleSpeechV2Service:
             # Format requires explicit encoding configuration
             audio_encoding_value = self.EXPLICIT_ENCODING_MAP[encoding_lower]
 
-            # Use actual audio metadata if available, otherwise use sensible defaults
-            if audio_metadata:
-                sample_rate = audio_metadata.get('sample_rate', 16000)
-                channels = audio_metadata.get('channels', 1)
-                logger.info(f"Using actual audio specs: {sample_rate}Hz, {channels} channel(s)")
-            else:
-                # Fallback defaults if metadata extraction failed
-                sample_rate = 16000  # Optimal for speech
-                channels = 1         # Mono typical for voice
-                logger.warning("No audio metadata available, using defaults: 16kHz mono")
+            # For container formats (M4A, MP4, MOV), try OMITTING sample_rate/channels
+            # Let Google read metadata from the container itself
+            # Providing explicit values might cause conflicts with embedded metadata
+            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding only, no sample_rate/channels)")
+            logger.info("Rationale: Container formats have embedded metadata - let Google read it")
 
             decoding_config_kwargs = {
                 'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
-                    encoding=audio_encoding_value,
-                    sample_rate_hertz=sample_rate,
-                    audio_channel_count=channels
+                    encoding=audio_encoding_value
+                    # OMIT sample_rate_hertz and audio_channel_count
+                    # Let Google read from M4A container metadata
                 )
             }
             # Handle both enum objects (with .name) and integers (without)
             encoding_name = getattr(audio_encoding_value, 'name', audio_encoding_value)
-            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {encoding_name}, {sample_rate}Hz, {channels}ch)")
+            logger.info(f"ExplicitDecodingConfig created: encoding={encoding_name}")
 
         elif encoding_lower in self.AUTO_DETECT_FORMATS:
             # Format supported by auto-detect
@@ -274,12 +269,19 @@ class GoogleSpeechV2Service:
             for uri, result in response.results.items():
                 logger.info(f"Processing URI: {uri}")
                 logger.info(f"Result type: {type(result)}")
-                logger.info(f"Result has transcript: {hasattr(result, 'transcript')}")
 
-                # Check for errors in this file's result
-                if hasattr(result, 'error'):
-                    logger.error(f"Error in result for {uri}: {result.error}")
+                # Check for errors FIRST (before looking at transcript)
+                if hasattr(result, 'error') and result.error.code != 0:
+                    logger.error(f"Google returned error for {uri}: {result.error}")
                     continue
+
+                # Now check transcript
+                logger.info(f"Result has transcript: {hasattr(result, 'transcript')}")
+                if hasattr(result, 'transcript'):
+                    logger.info(f"Transcript object: {result.transcript}")
+                    logger.info(f"Transcript is None: {result.transcript is None}")
+                    if result.transcript:
+                        logger.info(f"Transcript value: {str(result.transcript)[:200]}")  # First 200 chars
 
                 if hasattr(result, 'metadata'):
                     logger.info(f"Result metadata: {result.metadata}")
