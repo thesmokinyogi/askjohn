@@ -298,31 +298,42 @@ Audio file → Cloud Storage → Batch API → Poll for results → Retrieve →
 - Service account with Speech + Storage permissions
 - GCS bucket in same project
 
-**Cost Model:**
-- Chirp 3: $0.064/min (best accuracy)
-- Long: $0.024/min (optimized for long audio) - DEFAULT
-- Short: $0.024/min (optimized for <30 sec clips)
-- 60 min/month free tier
+**Cost Model (2025 Pricing):**
+- **Standard Tier:** $0.016/min (all models including Chirp, Long, Short)
+- **Dynamic Batch:** $0.004/min (75% discount, up to 24hr processing time)
+- **Free Tier:** 60 min/month (shared across all models and tiers)
+
+**Model Options:**
+- **Long** (default) - Optimized for recordings >30 min (yoga classes, lectures)
+- **Chirp** - Best accuracy, included at standard price (no premium)
+- **Short** - Optimized for clips <30 sec
+- All models available in Standard or Dynamic Batch pricing
 
 ---
 
-### 3.2 Whisper (Future)
+### 3.2 Whisper (OpenAI API)
 
 **Implementation Pattern:**
 ```
-Audio file → Local transcription → Return
+Audio file → OpenAI API → Return
 ```
 
-**Considerations:**
-- Local processing (no cloud upload)
-- CPU/GPU requirements
-- Model size tradeoffs
-- No per-minute cost (but infrastructure cost)
+**Cost Model (2025 Pricing):**
+- **Whisper:** $0.006/min (flat rate)
+- **GPT-4o Mini Transcribe:** $0.003/min (cost-sensitive option)
+- **Free Tier:** $5 credit one-time (expires after 3 months, ~833 minutes at standard rate)
+
+**Pricing Structure:**
+- One-time credit (not monthly recurring like Google)
+- After credit exhausted, pay full price forever
+- No volume discounts
+- Simpler model selection (fewer options than Google)
 
 **When to implement:**
-- User explicitly requests it
-- Cost analysis shows Google exceeds budget
-- Quality comparison needed
+- User wants cost comparison
+- After Google free tier exhausted (Whisper might be cheaper: $0.006 vs $0.016)
+- Quality/accuracy testing
+- Preference for OpenAI ecosystem
 
 ---
 
@@ -359,32 +370,84 @@ net_cost = gross_cost - free_tier_credit
 ### 4.2 Model Selection (Phase 1B)
 
 **UI Component:**
-- Radio buttons for model selection
-- Cost per minute displayed
+- Radio buttons for model + pricing tier selection
+- Cost per minute displayed (provider-specific)
 - Estimated total cost for current file
 - Budget remaining shown
-- Default: long (recommended for user's use case)
+- Free tier status (varies by provider)
+- Default: Google Long Standard (recommended for user's use case)
 
-**Configuration:**
+**Provider Configurations:**
 ```python
-MODEL_CONFIGS = {
-    "long": {
-        "name": "Long Audio",
-        "cost_per_min": 0.024,
-        "recommended_for": ["classes", "long recordings"],
-        "features": ["optimized_long_audio"]
+PROVIDER_CONFIGS = {
+    "google": {
+        "name": "Google Cloud Speech-to-Text V2",
+        "free_tier": {
+            "type": "monthly_minutes",
+            "amount": 60,
+            "shared": True
+        },
+        "models": {
+            "long_standard": {
+                "name": "Long Audio (Standard)",
+                "cost_per_min": 0.016,
+                "processing_time": "~1-3 minutes",
+                "recommended_for": ["yoga classes", "lectures", "long recordings"],
+                "features": ["optimized_long_audio", "automatic_punctuation"]
+            },
+            "long_batch": {
+                "name": "Long Audio (Dynamic Batch)",
+                "cost_per_min": 0.004,
+                "processing_time": "up to 24 hours",
+                "recommended_for": ["non-urgent transcription", "cost optimization"],
+                "features": ["optimized_long_audio", "75% cost savings"]
+            },
+            "chirp_standard": {
+                "name": "Chirp (Standard)",
+                "cost_per_min": 0.016,
+                "processing_time": "~1-3 minutes",
+                "recommended_for": ["best accuracy", "multi-speaker", "podcasts"],
+                "features": ["best_accuracy", "speaker_diarization", "multilingual"]
+            },
+            "chirp_batch": {
+                "name": "Chirp (Dynamic Batch)",
+                "cost_per_min": 0.004,
+                "processing_time": "up to 24 hours",
+                "recommended_for": ["best accuracy with cost savings"],
+                "features": ["best_accuracy", "speaker_diarization", "75% savings"]
+            },
+            "short_standard": {
+                "name": "Short Audio (Standard)",
+                "cost_per_min": 0.016,
+                "processing_time": "~1-2 minutes",
+                "recommended_for": ["clips under 30 seconds", "voice memos"],
+                "features": ["optimized_short_clips"]
+            }
+        }
     },
-    "chirp_3": {
-        "name": "Chirp 3",
-        "cost_per_min": 0.064,
-        "recommended_for": ["podcasts", "multi-speaker", "best_accuracy"],
-        "features": ["speaker_diarization", "multilingual", "best_accuracy"]
-    },
-    "short": {
-        "name": "Short Audio",
-        "cost_per_min": 0.024,
-        "recommended_for": ["clips", "quick_snippets"],
-        "features": ["optimized_short_clips"]
+    "whisper": {
+        "name": "OpenAI Whisper",
+        "free_tier": {
+            "type": "dollar_credit",
+            "amount": 5.00,
+            "expires_days": 90
+        },
+        "models": {
+            "whisper_standard": {
+                "name": "Whisper",
+                "cost_per_min": 0.006,
+                "processing_time": "~30-60 seconds",
+                "recommended_for": ["general transcription", "cost-effective"],
+                "features": ["good_accuracy", "fast_processing"]
+            },
+            "gpt4o_mini": {
+                "name": "GPT-4o Mini Transcribe",
+                "cost_per_min": 0.003,
+                "processing_time": "~30-60 seconds",
+                "recommended_for": ["cost-sensitive applications"],
+                "features": ["budget_friendly", "decent_accuracy"]
+            }
+        }
     }
 }
 ```
