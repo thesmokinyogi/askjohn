@@ -111,6 +111,40 @@
         .cost-breakdown { color: #92400e; text-align: right; }
         .cost-value { font-size: 18px; font-weight: 700; }
 
+        /* Model Indicator */
+        .model-indicator {
+            background: #e0e7ff;
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .model-indicator-label {
+            color: #4338ca;
+            font-weight: 600;
+        }
+
+        .model-indicator-value {
+            color: #4338ca;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .model-indicator-badge {
+            background: #10b981;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
         /* Advanced Options */
         .advanced-section { margin-top: 15px; }
 
@@ -393,6 +427,15 @@
             </div>
         </div>
 
+        <!-- Model Indicator -->
+        <div class="model-indicator">
+            <div class="model-indicator-label">🤖 Model</div>
+            <div class="model-indicator-value">
+                <span id="modelName">Chirp (Dynamic Batch)</span>
+                <span class="model-indicator-badge" id="modelBadge">75% Off</span>
+            </div>
+        </div>
+
         <!-- Advanced Options -->
         <div class="advanced-section">
             <div class="advanced-toggle" id="advancedToggle">
@@ -473,6 +516,7 @@
             await loadPricing();
             await loadBudget();
             renderModels();
+            updateModelIndicator(); // Show default model
             setupEventListeners();
         }
 
@@ -562,8 +606,36 @@
             selectedModel = modelKey;
             document.querySelectorAll('.model-option').forEach(el => el.classList.remove('selected'));
             event.currentTarget.classList.add('selected');
+
+            // Update model indicator
+            updateModelIndicator();
+
             if (fileDurationMinutes > 0) {
                 updateCostEstimate();
+            }
+        }
+
+        // Update model indicator display
+        function updateModelIndicator() {
+            if (!pricingData) return;
+
+            const model = pricingData.providers.google.models[selectedModel];
+            if (!model) return;
+
+            document.getElementById('modelName').textContent = model.display_name;
+
+            const badge = document.getElementById('modelBadge');
+
+            if (selectedModel.includes('batch')) {
+                badge.textContent = '75% Off';
+                badge.style.background = '#f59e0b';
+                badge.style.display = 'inline-block';
+            } else if (selectedModel.includes('chirp')) {
+                badge.textContent = 'Best';
+                badge.style.background = '#8b5cf6';
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
             }
         }
 
