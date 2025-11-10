@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice-to-Text Transcription</title>
-    <!-- music-metadata-browser for client-side duration detection -->
-    <script src="https://cdn.jsdelivr.net/npm/music-metadata-browser@2.5.10/dist/music-metadata-browser.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -765,12 +763,32 @@
             transcribeBtn.addEventListener('click', transcribeAudio);
         }
 
-        // Detect audio duration
+        // Detect audio duration using built-in Audio API
         async function detectDuration(file) {
             try {
-                const metadata = await musicMetadata.parseBlob(file);
-                const durationSeconds = metadata.format.duration || 0;
+                // Create a temporary URL for the audio file
+                const url = URL.createObjectURL(file);
+
+                // Create an Audio element to read metadata
+                const audio = new Audio();
+
+                // Wait for metadata to load
+                await new Promise((resolve, reject) => {
+                    audio.addEventListener('loadedmetadata', () => {
+                        resolve();
+                    });
+                    audio.addEventListener('error', (e) => {
+                        reject(new Error('Failed to load audio metadata'));
+                    });
+                    audio.src = url;
+                });
+
+                // Get duration in seconds
+                const durationSeconds = audio.duration;
                 fileDurationMinutes = durationSeconds / 60.0;
+
+                // Clean up the temporary URL
+                URL.revokeObjectURL(url);
 
                 console.log(`Duration detected: ${fileDurationMinutes.toFixed(1)} minutes`);
 
