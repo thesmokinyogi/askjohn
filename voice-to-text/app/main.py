@@ -20,6 +20,19 @@ from app.services.storage import CloudStorageService
 # Load environment variables from .env file
 load_dotenv()
 
+# ===== TEST MODE CONFIGURATION =====
+# Set to True to skip upload and use cached file for faster testing
+TEST_MODE_SKIP_UPLOAD = os.getenv("TEST_MODE_SKIP_UPLOAD", "false").lower() == "true"
+TEST_GCS_URI = os.getenv("TEST_GCS_URI", "gs://voice-to-text-audio-jc/uploads/20251110_060326_Voice_Memo_-_2014-06-28_16_33_27_-_Chelsea_And_The_Magician.m4a")
+TEST_AUDIO_METADATA = {
+    'sample_rate': 44100,
+    'channels': 1,
+    'duration': 336.8,
+    'codec': 'aac',
+    'bit_rate': 'unknown'
+}
+# ===================================
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -174,17 +187,26 @@ async def transcribe_audio(file: UploadFile = File(...)):
         # Google: Upload to GCS, batch transcribe, cleanup
         gcs_uri = None
         try:
-            # Upload to Cloud Storage and extract metadata
-            logger.info("Uploading to Cloud Storage...")
-            gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
+            # TEST MODE: Skip upload for faster iteration
+            if TEST_MODE_SKIP_UPLOAD:
+                logger.warning("⚠️  TEST MODE: Skipping upload, using cached file")
+                gcs_uri = TEST_GCS_URI
+                audio_metadata = TEST_AUDIO_METADATA
+                logger.info(f"Using cached: {gcs_uri}")
+                logger.info(f"Cached metadata: {audio_metadata['sample_rate']}Hz, {audio_metadata['channels']}ch")
+            else:
+                # Normal mode: Upload to Cloud Storage and extract metadata
+                logger.info("Uploading to Cloud Storage...")
+                gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
 
             # Transcribe from Cloud Storage with actual audio metadata
             logger.info("Starting batch transcription...")
             result = transcription_service.transcribe(gcs_uri, audio_metadata=audio_metadata)
 
-            # Clean up uploaded file
-            logger.info("Cleaning up temporary file...")
-            storage_service.delete_file(gcs_uri)
+            # Clean up uploaded file (skip if in test mode using cached file)
+            if not TEST_MODE_SKIP_UPLOAD:
+                logger.info("Cleaning up temporary file...")
+                storage_service.delete_file(gcs_uri)
 
         except Exception as e:
             logger.error(f"Transcription error: {e}")
