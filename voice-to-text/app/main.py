@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import os
 import logging
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Import services
@@ -18,6 +19,7 @@ from app.services.transcribe_v2 import get_transcription_service_v2
 from app.services.storage import CloudStorageService
 from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
+from app.services.jobs import get_job_storage
 
 # Load environment variables from .env file
 load_dotenv()
@@ -65,9 +67,10 @@ GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "long")  # Renamed from STT_MODEL
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 
-# Initialize pricing and budget services
+# Initialize pricing, budget, and job storage services
 pricing_service = get_pricing_service()
 budget_service = get_budget_service(monthly_budget=MONTHLY_BUDGET)
+job_storage = get_job_storage()
 
 # Initialize services based on provider
 if STT_PROVIDER == "google":
@@ -150,31 +153,37 @@ async def transcribe_audio(
     model: str = Form(None)
 ):
     """
-    Transcribe uploaded audio file using configured provider.
+    Submit a transcription job and return immediately with job ID.
 
-    Current provider: Google Speech-to-Text V2 Batch API
-    - Supports any audio length (up to 8 hours)
-    - Uploads to Cloud Storage temporarily
-    - Uses batch recognition
-    - Better accuracy with Chirp models
+    NEW JOB-BASED ARCHITECTURE:
+    - Uploads audio to Cloud Storage
+    - Submits transcription job to Google
+    - Returns IMMEDIATELY with job ID (doesn't wait for completion)
+    - User checks status later via /api/jobs/{job_id}/status
 
-    Future: Whisper, AssemblyAI, Deepgram support
+    This allows batch processing (up to 24 hours) without timeouts.
 
     Args:
         file: Audio file to transcribe
-        model: Model to use (e.g., 'chirp_batch', 'long_standard').
-               Defaults to GOOGLE_MODEL from .env
+        model: Model to use (e.g., 'chirp_batch', 'long_standard')
 
-    Accepts: mp3, wav, m4a, ogg, flac, mp4, mov
-    Returns: Transcript with confidence score, word-level details, and cost info
+    Returns:
+        {
+            "job_id": "projects/.../operations/123",
+            "status": "queued",
+            "submitted_at": "2025-11-10T...",
+            "estimated_cost": 1.20
+        }
     """
+
+    # ===== STEP 1: Validate and prepare file =====
 
     # Use provided model or fall back to environment variable
     selected_model = model or GOOGLE_MODEL
 
     # Map UI model names to Google API model names
-    # UI uses: chirp_batch, chirp_standard, long_batch, long_standard
-    # Google API uses: chirp, long, short
+    # UI: chirp_batch, chirp_standard, long_batch, long_standard
+    # API: chirp, long, short
     model_mapping = {
         'chirp_batch': 'chirp',
         'chirp_standard': 'chirp',
@@ -201,7 +210,7 @@ async def transcribe_audio(
             detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
         )
 
-    # Read file bytes
+    # Read file bytes into memory
     try:
         audio_bytes = await file.read()
     except Exception as e:
@@ -211,7 +220,7 @@ async def transcribe_audio(
             detail=f"Error reading file: {str(e)}"
         )
 
-    # Validate file size (provider-specific)
+    # Validate file size
     max_size_mb = 500 if STT_PROVIDER == "google" else 10
     if len(audio_bytes) > max_size_mb * 1024 * 1024:
         raise HTTPException(
@@ -221,125 +230,315 @@ async def transcribe_audio(
 
     logger.info(f"Processing file: {file.filename} ({len(audio_bytes)} bytes)")
 
-    # Route to provider-specific transcription
-    if STT_PROVIDER == "google":
-        # Google: Upload to GCS, batch transcribe, cleanup
-        gcs_uri = None
-        try:
-            # TEST MODE: Skip upload for faster iteration
-            if TEST_MODE_SKIP_UPLOAD:
-                logger.warning("⚠️  TEST MODE: Skipping upload, using cached file")
-                gcs_uri = TEST_GCS_URI
-                audio_metadata = TEST_AUDIO_METADATA
-                logger.info(f"Using cached: {gcs_uri}")
-                logger.info(f"Cached metadata: {audio_metadata['sample_rate']}Hz, {audio_metadata['channels']}ch")
-            else:
-                # Normal mode: Upload to Cloud Storage and extract metadata
-                logger.info("Uploading to Cloud Storage...")
-                gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
+    # ===== STEP 2: Upload to Cloud Storage =====
 
-            # Initialize transcription service with Google API model name
-            model_transcription_service = get_transcription_service_v2(
-                project_id=GOOGLE_CLOUD_PROJECT,
-                model=google_api_model
-            )
+    gcs_uri = None
+    try:
+        # TEST MODE: Skip upload for faster testing
+        if TEST_MODE_SKIP_UPLOAD:
+            logger.warning("⚠️  TEST MODE: Skipping upload, using cached file")
+            gcs_uri = TEST_GCS_URI
+            audio_metadata = TEST_AUDIO_METADATA
+        else:
+            # Normal mode: Upload to GCS and extract metadata
+            logger.info("Uploading to Cloud Storage...")
+            gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
+            logger.info(f"Uploaded to: {gcs_uri}")
 
-            # Transcribe from Cloud Storage with actual audio metadata
-            logger.info(f"Starting batch transcription with model: {google_api_model} (UI: {selected_model})...")
-            result = model_transcription_service.transcribe(gcs_uri, audio_metadata=audio_metadata)
+        # ===== STEP 3: Calculate estimated cost =====
 
-            # Clean up uploaded file (skip if in test mode using cached file)
-            if not TEST_MODE_SKIP_UPLOAD:
-                logger.info("Cleaning up temporary file...")
-                storage_service.delete_file(gcs_uri)
+        # Get duration from metadata
+        duration_minutes = audio_metadata.get('duration', 0) / 60.0
 
-        except Exception as e:
-            logger.error(f"Transcription error: {e}")
-            # Clean up on error
-            if gcs_uri:
-                storage_service.delete_file(gcs_uri)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Transcription error: {str(e)}"
-            )
+        # Get free tier remaining
+        free_tier_remaining = budget_service.get_free_tier_remaining(STT_PROVIDER)
 
-    elif STT_PROVIDER == "whisper":
-        # Whisper: Direct transcription (when implemented)
-        try:
-            result = transcription_service.transcribe(audio_bytes, file_extension)
-        except Exception as e:
-            logger.error(f"Transcription error: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Transcription error: {str(e)}"
-            )
-
-    else:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Provider {STT_PROVIDER} not properly configured"
+        # Estimate cost (before job starts)
+        cost_estimate = pricing_service.estimate_cost(
+            provider=STT_PROVIDER,
+            model=selected_model,
+            duration_minutes=duration_minutes,
+            free_tier_remaining=free_tier_remaining
         )
 
-    # Check if transcription was successful
-    if not result.get("success", False):
-        raise HTTPException(
-            status_code=500,
-            detail=result.get("error", "Unknown transcription error")
+        logger.info(
+            f"Estimated cost: ${cost_estimate['total_cost']:.2f} "
+            f"({cost_estimate['billable_minutes']:.1f} min @ ${cost_estimate['cost_per_minute']}/min)"
         )
 
-    logger.info(f"Transcription complete: {result['metadata'].get('total_words', 0)} words")
+        # ===== STEP 4: Submit transcription job (NON-BLOCKING) =====
 
-    # Calculate cost and record in budget
-    duration_seconds = result["metadata"].get("duration_seconds", 0)
-    duration_minutes = duration_seconds / 60.0
+        # Initialize transcription service with API model name
+        model_transcription_service = get_transcription_service_v2(
+            project_id=GOOGLE_CLOUD_PROJECT,
+            model=google_api_model
+        )
 
-    # Get free tier remaining
-    free_tier_remaining = budget_service.get_free_tier_remaining(STT_PROVIDER)
+        # Submit job - this returns IMMEDIATELY (doesn't wait)
+        logger.info(f"Submitting transcription job with model: {google_api_model}")
+        operation = model_transcription_service.submit_job(
+            gcs_uri=gcs_uri,
+            audio_metadata=audio_metadata
+        )
 
-    # Calculate cost
-    cost_estimate = pricing_service.estimate_cost(
-        provider=STT_PROVIDER,
-        model=selected_model,
-        duration_minutes=duration_minutes,
-        free_tier_remaining=free_tier_remaining
-    )
+        # Extract the job ID from the operation
+        # This is Google's unique identifier for this operation
+        # We'll use it later to check status and get results
+        job_id = operation.operation.name
+        logger.info(f"Job submitted successfully: {job_id}")
 
-    # Record transcription in budget
-    budget_service.record_transcription(
-        provider=STT_PROVIDER,
-        model=selected_model,
-        duration_minutes=duration_minutes,
-        cost=cost_estimate["total_cost"],
-        free_minutes_used=cost_estimate["free_minutes_used"],
-        filename=file.filename
-    )
+        # ===== STEP 5: Store job record =====
 
-    logger.info(
-        f"Cost: ${cost_estimate['total_cost']:.2f} "
-        f"({cost_estimate['billable_minutes']:.1f} min @ ${cost_estimate['cost_per_minute']}/min)"
-    )
+        # Create job record in our storage
+        # This lets us track and list jobs later
+        job_record = job_storage.create_job(
+            job_id=job_id,
+            filename=file.filename,
+            model=selected_model,
+            duration_minutes=duration_minutes,
+            estimated_cost=cost_estimate['total_cost']
+        )
 
-    # Return result
-    return JSONResponse(content={
-        "success": True,
-        "filename": file.filename,
-        "transcript": result["transcript"],
-        "confidence": result["confidence"],
-        "word_count": result["metadata"].get("total_words", 0),
-        "provider": STT_PROVIDER,
-        "model": selected_model,
-        "cost": {
-            "total_cost": cost_estimate["total_cost"],
-            "duration_minutes": duration_minutes,
-            "billable_minutes": cost_estimate["billable_minutes"],
-            "free_minutes_used": cost_estimate["free_minutes_used"],
-            "cost_per_minute": cost_estimate["cost_per_minute"]
-        },
-        "details": {
-            "words": result["words"],  # Word-level timestamps and confidence
-            "metadata": result["metadata"]
+        # ===== STEP 6: Return immediately =====
+
+        # We're done! User gets job ID back in < 1 second
+        # They can check status later via /api/jobs/{job_id}/status
+        return JSONResponse(content={
+            "job_id": job_id,
+            "status": "queued",
+            "filename": file.filename,
+            "model": selected_model,
+            "duration_minutes": round(duration_minutes, 1),
+            "estimated_cost": cost_estimate['total_cost'],
+            "submitted_at": job_record["submitted_at"],
+            "check_status_url": f"/api/jobs/{job_id}/status"
+        })
+
+    except Exception as e:
+        logger.error(f"Error submitting transcription job: {e}")
+
+        # Clean up uploaded file on error
+        if gcs_uri and not TEST_MODE_SKIP_UPLOAD:
+            try:
+                storage_service.delete_file(gcs_uri)
+            except:
+                pass  # Best effort cleanup
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error submitting transcription: {str(e)}"
+        )
+
+
+@app.get("/api/jobs/{job_id}/status")
+async def check_job_status(job_id: str):
+    """
+    Check the status of a transcription job.
+
+    This is the polling endpoint - clients call this repeatedly to check if their
+    transcription is done yet. It's designed to be fast and non-blocking.
+
+    Args:
+        job_id: Google operation name (returned from /transcribe)
+
+    Returns:
+        {
+            "job_id": "projects/.../operations/123",
+            "status": "queued|processing|complete|failed",
+            "filename": "audio.mp3",
+            "submitted_at": "2025-11-10T...",
+            "transcript": "..." (if complete),
+            "confidence": 0.95 (if complete),
+            "actual_cost": 1.20 (if complete),
+            "error": "..." (if failed)
         }
-    })
+    """
+    try:
+        # ===== STEP 1: Get job record from our storage =====
+
+        # This gives us metadata we stored when job was submitted
+        # (filename, model, estimated cost, etc.)
+        job_record = job_storage.get_job(job_id)
+
+        if not job_record:
+            # Job ID not found in our records
+            raise HTTPException(
+                status_code=404,
+                detail=f"Job not found: {job_id}"
+            )
+
+        # ===== STEP 2: Check Google's operation status =====
+
+        # If job is already marked complete/failed in our records, return cached result
+        # This avoids unnecessary API calls to Google for jobs we've already processed
+        if job_record["status"] in ["complete", "failed"]:
+            logger.info(f"Returning cached status for job {job_id}: {job_record['status']}")
+            return JSONResponse(content={
+                "job_id": job_id,
+                "status": job_record["status"],
+                "filename": job_record["filename"],
+                "model": job_record["model"],
+                "submitted_at": job_record["submitted_at"],
+                "completed_at": job_record.get("completed_at"),
+                "transcript": job_record.get("transcript"),
+                "confidence": job_record.get("confidence"),
+                "actual_cost": job_record.get("actual_cost"),
+                "error": job_record.get("error")
+            })
+
+        # Job is still in progress - check Google for updates
+        logger.info(f"Checking Google operation status for job {job_id}")
+
+        # Reconnect to Google's operation and check status
+        # This is non-blocking - returns immediately
+        status_result = transcription_service.check_job_status(job_id)
+
+        # ===== STEP 3: Update our job record if status changed =====
+
+        if status_result["done"]:
+            # Job finished (either successfully or with error)
+
+            if status_result["status"] == "complete":
+                # Success! Update job record with results
+                logger.info(f"Job {job_id} completed successfully")
+
+                # Calculate actual cost from billed duration
+                # Google's metadata includes the actual billed time
+                # For now, use estimated cost (we'll enhance this later)
+                actual_cost = job_record["estimated_cost"]
+
+                # Update job record in storage
+                job_storage.mark_complete(
+                    job_id=job_id,
+                    transcript=status_result["transcript"],
+                    confidence=status_result["confidence"],
+                    actual_cost=actual_cost,
+                    metadata=status_result.get("metadata")
+                )
+
+                # Update budget service with actual usage
+                # This tracks our monthly spending
+                from app.services.budget import get_budget_service
+                budget_service = get_budget_service()
+                budget_service.add_usage(
+                    provider=STT_PROVIDER,
+                    cost=actual_cost,
+                    duration_minutes=job_record["duration_minutes"]
+                )
+
+                # Return complete result
+                return JSONResponse(content={
+                    "job_id": job_id,
+                    "status": "complete",
+                    "filename": job_record["filename"],
+                    "model": job_record["model"],
+                    "submitted_at": job_record["submitted_at"],
+                    "completed_at": datetime.now().isoformat(),
+                    "transcript": status_result["transcript"],
+                    "confidence": status_result["confidence"],
+                    "actual_cost": actual_cost,
+                    "metadata": status_result.get("metadata")
+                })
+
+            else:
+                # Job failed - update record with error
+                logger.error(f"Job {job_id} failed: {status_result.get('error')}")
+
+                job_storage.mark_failed(
+                    job_id=job_id,
+                    error=status_result.get("error", "Unknown error")
+                )
+
+                return JSONResponse(content={
+                    "job_id": job_id,
+                    "status": "failed",
+                    "filename": job_record["filename"],
+                    "model": job_record["model"],
+                    "submitted_at": job_record["submitted_at"],
+                    "completed_at": datetime.now().isoformat(),
+                    "error": status_result.get("error")
+                })
+
+        # ===== STEP 4: Job still processing, return current status =====
+
+        # Job is still queued or processing at Google
+        # Update our record to show it's in progress (not just queued)
+        if job_record["status"] == "queued":
+            job_storage.update_job(job_id, {"status": "processing"})
+
+        return JSONResponse(content={
+            "job_id": job_id,
+            "status": "processing",
+            "filename": job_record["filename"],
+            "model": job_record["model"],
+            "submitted_at": job_record["submitted_at"],
+            "message": "Transcription in progress. Check again in a few seconds."
+        })
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404 Not Found)
+        raise
+    except Exception as e:
+        logger.error(f"Error checking job status: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error checking job status: {str(e)}"
+        )
+
+
+@app.get("/api/jobs")
+async def list_jobs(status: str = None, limit: int = 100):
+    """
+    List all transcription jobs.
+
+    This endpoint powers the Jobs page - shows all transcriptions the user has run.
+    Jobs are sorted by submission time (newest first).
+
+    Args:
+        status: Filter by status (queued, processing, complete, failed)
+        limit: Maximum number of jobs to return (default 100)
+
+    Returns:
+        {
+            "jobs": [
+                {
+                    "job_id": "projects/.../operations/123",
+                    "filename": "audio.mp3",
+                    "model": "long_standard",
+                    "status": "complete",
+                    "submitted_at": "2025-11-10T...",
+                    "duration_minutes": 5.2,
+                    "estimated_cost": 0.12,
+                    "transcript": "..." (if complete)
+                },
+                ...
+            ],
+            "stats": {
+                "total_jobs": 42,
+                "by_status": {"complete": 35, "processing": 2, "failed": 5},
+                "total_cost": 12.34
+            }
+        }
+    """
+    try:
+        # Get filtered and sorted list of jobs
+        jobs_list = job_storage.list_jobs(status=status, limit=limit)
+
+        # Get overall statistics
+        stats = job_storage.get_stats()
+
+        return JSONResponse(content={
+            "jobs": jobs_list,
+            "stats": stats,
+            "count": len(jobs_list)
+        })
+
+    except Exception as e:
+        logger.error(f"Error listing jobs: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing jobs: {str(e)}"
+        )
 
 
 @app.get("/config")

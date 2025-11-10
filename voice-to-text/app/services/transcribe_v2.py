@@ -97,6 +97,149 @@ class GoogleSpeechV2Service:
 
         logger.info(f"Initialized Speech V2 service: model={model}, project={project_id}")
 
+    def submit_job(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None):
+        """
+        Submit a transcription job to Google Cloud WITHOUT waiting for completion.
+
+        This is for job-based architecture where we return immediately with a job ID
+        and check status later.
+
+        Args:
+            gcs_uri: Google Cloud Storage URI (gs://bucket/path/file.ext)
+            language_code: Language code (default: en-US)
+            audio_metadata: Audio file metadata (sample_rate, channels, etc.)
+
+        Returns:
+            operation: Google LongRunningOperation object
+                      Use operation.operation.name to get job ID
+                      Use operation.done() to check status later
+        """
+        try:
+            # Build recognition config
+            config = self._build_config(
+                audio_encoding=gcs_uri.split('.')[-1],  # Extract extension
+                language_code=language_code,
+                audio_metadata=audio_metadata
+            )
+
+            # Create batch recognition request
+            file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
+            request = cloud_speech.BatchRecognizeRequest(
+                recognizer=f"projects/{self.project_id}/locations/global/recognizers/_",
+                config=config,
+                files=[file_metadata],
+                recognition_output_config=cloud_speech.RecognitionOutputConfig(
+                    inline_response_config=cloud_speech.InlineOutputConfig()
+                ),
+            )
+
+            # Submit batch recognition job
+            # This returns IMMEDIATELY with an operation object
+            # The actual transcription happens asynchronously in Google's queue
+            logger.info(f"Submitting batch recognition job for: {gcs_uri}")
+            logger.info(f"Model: {config.model}, Language: {config.language_codes}")
+            operation = self.client.batch_recognize(request=request)
+
+            # Extract job ID for logging
+            job_id = operation.operation.name
+            logger.info(f"Job submitted successfully: {job_id}")
+
+            # Return the operation object (caller can extract job ID and store it)
+            return operation
+
+        except Exception as e:
+            logger.error(f"Error submitting transcription job: {e}")
+            raise
+
+    def check_job_status(self, job_id: str) -> Dict:
+        """
+        Check the status of a transcription job by reconnecting to Google's operation.
+
+        This is the core of our polling architecture - we can check status at any time
+        by using the job_id (which is Google's operation name).
+
+        Args:
+            job_id: Google operation name (e.g., "projects/.../operations/123")
+
+        Returns:
+            Dict with status information:
+            {
+                "done": True/False,
+                "status": "queued|processing|complete|failed",
+                "transcript": "..." (if complete),
+                "confidence": 0.95 (if complete),
+                "words": [...] (if complete),
+                "error": "..." (if failed),
+                "metadata": {...} (if complete)
+            }
+        """
+        try:
+            # Reconnect to the operation using its name (job_id)
+            # This is Google's way of letting us check on jobs we submitted earlier
+            # The operation name is stable - we can use it hours or days later
+            logger.info(f"Checking status for job: {job_id}")
+            operation = self.client.get_operation(name=job_id)
+
+            # Check if operation is done (non-blocking check)
+            # This returns immediately - doesn't wait for completion
+            is_done = operation.done
+
+            if not is_done:
+                # Job is still queued or processing
+                logger.info(f"Job {job_id} is still in progress")
+                return {
+                    "done": False,
+                    "status": "processing",  # Could be queued or actively processing
+                    "transcript": None,
+                    "confidence": None,
+                    "words": None,
+                    "error": None,
+                    "metadata": None
+                }
+
+            # Job is done - check for errors first
+            if operation.error.code != 0:
+                # Operation completed with error
+                error_message = f"Google error {operation.error.code}: {operation.error.message}"
+                logger.error(f"Job {job_id} failed: {error_message}")
+                return {
+                    "done": True,
+                    "status": "failed",
+                    "transcript": None,
+                    "confidence": None,
+                    "words": None,
+                    "error": error_message,
+                    "metadata": None
+                }
+
+            # Job completed successfully - parse results
+            # operation.response contains the BatchRecognizeResponse
+            logger.info(f"Job {job_id} completed successfully, parsing results...")
+            results = self._parse_results(operation.response)
+
+            # Add done flag to results
+            results["done"] = True
+
+            # Map success field to status for consistency
+            if results.get("success"):
+                results["status"] = "complete"
+            else:
+                results["status"] = "failed"
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error checking job status: {e}")
+            return {
+                "done": False,
+                "status": "error",
+                "transcript": None,
+                "confidence": None,
+                "words": None,
+                "error": f"Error checking status: {str(e)}",
+                "metadata": None
+            }
+
     def transcribe(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None) -> Dict:
         """
         Transcribe audio file from Cloud Storage using batch recognition.
