@@ -117,6 +117,27 @@ This document defines **how we work together** on this project. For **what we're
 
 ---
 
+### Before Implementing New APIs/Libraries
+
+**Principle:** Be thorough with documentation BEFORE writing code. Let documentation be the test oracle, not the user.
+
+- [ ] **Find complete working example:** Not just mentions - full, runnable code
+- [ ] **Read constructor/method signature:** What parameters exist? Which are required?
+- [ ] **Identify all required parameters:** Don't guess - verify each one
+- [ ] **Understand parameter purpose:** What does each parameter do? What are valid values?
+- [ ] **Check for sensible defaults:** What are recommended values for our use case?
+- [ ] **Look for gotchas:** Common errors, version differences, edge cases
+
+**Anti-pattern:** Finding "you need X API" and immediately implementing with minimal parameters. This creates error-driven development where user discovers missing requirements.
+
+**Example (M4A transcription):**
+- ✗ Found: "Use ExplicitDecodingConfig for M4A" → implemented with just `encoding` → user hit error about missing `audio_channel_count`
+- ✓ Should have: Found complete example → saw it needs `encoding`, `sample_rate_hertz`, `audio_channel_count` → implemented all three → worked first try
+
+**Test:** Would this code work on first try if I followed the documentation completely?
+
+---
+
 ### Before Committing Code
 
 - [ ] **Verify completeness:** Did we solve the whole problem?
@@ -326,6 +347,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 |---------|------|---------|
 | 1.0 | 2025-11-09 | Initial working agreement |
 | 1.1 | 2025-11-09 | Updated default to Level 3 (Brief), added learning curve rule |
+| 1.2 | 2025-11-09 | Added "Before Implementing New APIs/Libraries" checklist - be thorough with documentation first |
 
 ---
 
