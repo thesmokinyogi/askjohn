@@ -138,6 +138,38 @@ This document defines **how we work together** on this project. For **what we're
 
 ---
 
+### When Debugging Repeated Failures
+
+**Principle:** After 2-3 failures with same approach, pivot search strategy. Match search to actual experience (failing), not assumptions (should work).
+
+**Search Strategy Progression:**
+1. **First attempt:** Search "how to do X" (implementation guides, tutorials)
+2. **After 2-3 failures:** Pivot to "X not working" or "X issues" or "X problems" (real-world issues, bug reports, known limitations)
+3. **Deep debugging:** Search "X broken" or "X doesn't work" (community discussions, GitHub issues)
+
+**Why This Works:**
+- "How to do X" finds success stories and documentation
+- "X not working" finds people with same problem
+- Bug reports often contain root cause + workarounds
+- Community issues reveal undocumented limitations
+
+**Example (M4A batch transcription debugging):**
+- ✗ Searched: "batch_recognize M4A example" → found docs claiming M4A_AAC works
+- ✗ Tried: Multiple ExplicitDecodingConfig variations → all failed
+- ✗ Spent: 3+ hours debugging configuration parameters
+- ✓ Should have searched: "batch_recognize M4A not working" → would have immediately found known issues with M4A format
+- ✓ Result: Community reports confirmed M4A broken with batch API, conversion to MP3 required
+
+**Red Flags (Time to Pivot Search):**
+- Same error after 3+ different attempts
+- Documentation says it should work, but doesn't
+- Parameters all seem correct, still failing
+- Suspicion that underlying API might be broken
+
+**Test:** Have I tried searching for "why this doesn't work" instead of only "how to make this work"?
+
+---
+
 ### Before Committing Code
 
 - [ ] **Verify completeness:** Did we solve the whole problem?
@@ -348,6 +380,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 | 1.0 | 2025-11-09 | Initial working agreement |
 | 1.1 | 2025-11-09 | Updated default to Level 3 (Brief), added learning curve rule |
 | 1.2 | 2025-11-09 | Added "Before Implementing New APIs/Libraries" checklist - be thorough with documentation first |
+| 1.3 | 2025-11-10 | Added "When Debugging Repeated Failures" - search strategy for "X not working" vs "how to do X" |
 
 ---
 
