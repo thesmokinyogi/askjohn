@@ -77,6 +77,10 @@ class CloudStorageService:
 
         blob.upload_from_string(audio_bytes, content_type=content_type, timeout=900)
 
+        # Verify upload succeeded by checking blob metadata
+        blob.reload()  # Refresh metadata from GCS
+        logger.info(f"Verified upload - size: {blob.size} bytes, content-type: {blob.content_type}, exists: {blob.exists()}")
+
         # Get GCS URI
         gcs_uri = f"gs://{self.bucket_name}/{blob_name}"
 

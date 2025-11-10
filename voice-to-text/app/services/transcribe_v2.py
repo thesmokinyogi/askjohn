@@ -82,8 +82,11 @@ class GoogleSpeechV2Service:
             Dict with transcript, confidence, words, and metadata
         """
         try:
+            # Extract file extension from URI for format-specific config
+            file_extension = gcs_uri.split('.')[-1].lower() if '.' in gcs_uri else None
+
             # Configure recognition
-            config = self._build_config(language_code)
+            config = self._build_config(language_code, audio_encoding=file_extension)
 
             # Create recognition request
             file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
@@ -121,19 +124,38 @@ class GoogleSpeechV2Service:
                 "metadata": {"error_type": "transcription_error"}
             }
 
-    def _build_config(self, language_code: str) -> cloud_speech.RecognitionConfig:
+    def _build_config(self, language_code: str, audio_encoding: str = None) -> cloud_speech.RecognitionConfig:
         """
         Build recognition configuration with optimal settings.
 
         Args:
             language_code: Language for recognition
+            audio_encoding: Audio file extension (e.g., 'm4a', 'mp3', 'wav').
+                          M4A requires explicit config - not supported by auto-detect.
 
         Returns:
             RecognitionConfig object
         """
         # V2 API uses simple model names like "long", "short", "chirp_3"
         # Not full resource paths
-        logger.info(f"Building config with model: {self.model}")
+        logger.info(f"Building config with model: {self.model}, encoding: {audio_encoding}")
+
+        # Choose decoding config based on audio format
+        # M4A requires explicit config - NOT supported by AutoDetectDecodingConfig
+        # Auto-detect supports: WAV, FLAC, MP3, OGG_OPUS, WEBM_OPUS
+        if audio_encoding and audio_encoding.upper() == 'M4A':
+            decoding_config_kwargs = {
+                'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
+                    encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.M4A_AAC,
+                )
+            }
+            logger.info("Using ExplicitDecodingConfig for M4A format")
+        else:
+            # Auto-detect for MP3, WAV, FLAC, OGG, WEBM
+            decoding_config_kwargs = {
+                'auto_decoding_config': cloud_speech.AutoDetectDecodingConfig()
+            }
+            logger.info("Using AutoDetectDecodingConfig")
 
         # TODO: Fix phrase hints syntax for V2 API
         # V2 has different syntax than V1 for custom vocabulary
@@ -143,7 +165,7 @@ class GoogleSpeechV2Service:
         # )
 
         config = cloud_speech.RecognitionConfig(
-            auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
+            **decoding_config_kwargs,
             language_codes=[language_code],
             model=self.model,  # Use model name directly, not resource path
             features=cloud_speech.RecognitionFeatures(
