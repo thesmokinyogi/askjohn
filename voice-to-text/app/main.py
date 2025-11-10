@@ -367,7 +367,8 @@ async def check_job_status(job_id: str):
 
         # This gives us metadata we stored when job was submitted
         # (filename, model, estimated cost, etc.)
-        job_record = job_storage.get_job(job_id)
+        # For in-progress jobs, don't load transcript (it doesn't exist yet)
+        job_record = job_storage.get_job(job_id, include_transcript=False)
 
         if not job_record:
             # Job ID not found in our records
@@ -382,6 +383,23 @@ async def check_job_status(job_id: str):
         # This avoids unnecessary API calls to Google for jobs we've already processed
         if job_record["status"] in ["complete", "failed"]:
             logger.info(f"Returning cached status for job {job_id}: {job_record['status']}")
+
+            # For completed jobs, load the transcript from file
+            if job_record["status"] == "complete":
+                job_with_transcript = job_storage.get_job(job_id, include_transcript=True)
+                return JSONResponse(content={
+                    "job_id": job_id,
+                    "status": job_with_transcript["status"],
+                    "filename": job_with_transcript["filename"],
+                    "model": job_with_transcript["model"],
+                    "submitted_at": job_with_transcript["submitted_at"],
+                    "completed_at": job_with_transcript.get("completed_at"),
+                    "transcript": job_with_transcript.get("transcript"),  # Loaded from file
+                    "confidence": job_with_transcript.get("confidence"),
+                    "actual_cost": job_with_transcript.get("actual_cost")
+                })
+
+            # For failed jobs, just return error
             return JSONResponse(content={
                 "job_id": job_id,
                 "status": job_record["status"],
@@ -389,9 +407,6 @@ async def check_job_status(job_id: str):
                 "model": job_record["model"],
                 "submitted_at": job_record["submitted_at"],
                 "completed_at": job_record.get("completed_at"),
-                "transcript": job_record.get("transcript"),
-                "confidence": job_record.get("confidence"),
-                "actual_cost": job_record.get("actual_cost"),
                 "error": job_record.get("error")
             })
 
@@ -531,7 +546,12 @@ async def list_jobs(status: str = None, limit: int = 100):
     """
     try:
         # Get filtered and sorted list of jobs
-        jobs_list = job_storage.list_jobs(status=status, limit=limit)
+        # Include transcripts so Jobs page can display them
+        jobs_list = job_storage.list_jobs(
+            status=status,
+            limit=limit,
+            include_transcripts=True  # Load transcript data for completed jobs
+        )
 
         # Get overall statistics
         stats = job_storage.get_stats()
