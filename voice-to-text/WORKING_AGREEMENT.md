@@ -128,6 +128,66 @@ Root cause fixes feel slower initially but:
 
 ---
 
+### 7. Verify Before Trust
+**Principle:** Empirically validate that resources work and are current before depending on them.
+
+**The Pattern:**
+Assumptions about external resources are dangerous:
+- Libraries get deprecated or removed from CDNs
+- API endpoints change or disappear
+- Documentation becomes outdated
+- Examples in tutorials age poorly
+- URLs return 403/404 silently
+
+Verification catches problems before they enter the codebase:
+- Test that resources are actually accessible
+- Check for latest/current versions
+- Confirm APIs respond as expected
+- Validate examples still work
+- Ensure documentation matches reality
+
+**Practice:**
+- Before using library: Check current version, verify it loads
+- Before using CDN URL: Test URL actually returns content
+- Before calling API: Verify endpoint responds
+- Before following tutorial: Check if example is still current
+- Before trusting docs: Confirm behavior matches description
+
+**Examples:**
+- ✗ Use `music-metadata-browser@2.5.10` from 2021 tutorial
+- ✓ Check npm for latest version, test CDN URL loads (would have caught 403)
+- ✗ Assume API endpoint exists from documentation
+- ✓ Test endpoint with curl/fetch before implementing
+- ✗ Copy code from Stack Overflow without testing
+- ✓ Run example to verify it works, then adapt
+
+**Warning Signs:**
+- "This example looks good, I'll just use it"
+- "It's a popular library, surely it works"
+- "The docs say to do X" (without testing)
+- Finding failures only when user reports them
+- Silent failures in production
+
+**Test Questions:**
+- Did I verify this resource actually loads/works?
+- Am I using the current version or an old example?
+- Have I tested this before putting it in code?
+- Would this fail gracefully or silently?
+
+**Why This Matters:**
+- Empirical validation > Optimistic assumption
+- Catch problems at selection time, not runtime
+- Silent failures are the worst kind
+- External dependencies are fragile
+- Trust, but verify
+
+**Connection to Other Principles:**
+- Extends "Root Cause Over Band-Aids" to investigation phase
+- Complements "Before Implementing New APIs/Libraries"
+- Supports "Simple But Robust" (verified simple > assumed complex)
+
+---
+
 ## Decision-Making Checklists
 
 ### Before Implementing Anything
@@ -429,6 +489,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 | 1.2 | 2025-11-09 | Added "Before Implementing New APIs/Libraries" checklist - be thorough with documentation first |
 | 1.3 | 2025-11-10 | Added "When Debugging Repeated Failures" - search strategy for "X not working" vs "how to do X" |
 | 1.4 | 2025-11-10 | Added "Root Cause Over Band-Aids" principle - fix underlying problems, resist outcome theater, value craftsmanship |
+| 1.5 | 2025-11-10 | Added "Verify Before Trust" principle - empirically validate resources work and are current before depending on them |
 
 ---
 
