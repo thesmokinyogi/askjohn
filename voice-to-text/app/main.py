@@ -5,7 +5,7 @@ FastAPI app for transcribing audio files using Google Speech-to-Text.
 Supports both V1 (synchronous, <60 sec) and V2 (batch, any length).
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -147,7 +147,7 @@ async def health_check():
 @app.post("/transcribe")
 async def transcribe_audio(
     file: UploadFile = File(...),
-    model: str = None
+    model: str = Form(None)
 ):
     """
     Transcribe uploaded audio file using configured provider.
@@ -171,6 +171,25 @@ async def transcribe_audio(
 
     # Use provided model or fall back to environment variable
     selected_model = model or GOOGLE_MODEL
+
+    # Map UI model names to Google API model names
+    # UI uses: chirp_batch, chirp_standard, long_batch, long_standard
+    # Google API uses: chirp, long, short
+    model_mapping = {
+        'chirp_batch': 'chirp',
+        'chirp_standard': 'chirp',
+        'long_batch': 'long',
+        'long_standard': 'long',
+        'short_batch': 'short',
+        'short_standard': 'short',
+        # Also support direct API names
+        'chirp': 'chirp',
+        'long': 'long',
+        'short': 'short'
+    }
+
+    google_api_model = model_mapping.get(selected_model, 'long')
+    logger.info(f"Model selection: UI={selected_model}, API={google_api_model}")
 
     # Validate file type
     allowed_extensions = ["mp3", "wav", "m4a", "ogg", "flac", "mp4", "mov"]
@@ -219,14 +238,14 @@ async def transcribe_audio(
                 logger.info("Uploading to Cloud Storage...")
                 gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
 
-            # Initialize transcription service with selected model
+            # Initialize transcription service with Google API model name
             model_transcription_service = get_transcription_service_v2(
                 project_id=GOOGLE_CLOUD_PROJECT,
-                model=selected_model
+                model=google_api_model
             )
 
             # Transcribe from Cloud Storage with actual audio metadata
-            logger.info(f"Starting batch transcription with model: {selected_model}...")
+            logger.info(f"Starting batch transcription with model: {google_api_model} (UI: {selected_model})...")
             result = model_transcription_service.transcribe(gcs_uri, audio_metadata=audio_metadata)
 
             # Clean up uploaded file (skip if in test mode using cached file)

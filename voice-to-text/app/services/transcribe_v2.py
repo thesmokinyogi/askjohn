@@ -136,7 +136,13 @@ class GoogleSpeechV2Service:
 
             # Poll until complete
             logger.info("Waiting for transcription to complete...")
-            response = operation.result(timeout=600)  # 10 minute timeout
+            # Timeout based on model:
+            # - Standard tier: typically 1-3 minutes, allow up to 30 min for safety
+            # - Batch tier: up to 24 hours, but we'll timeout at 1 hour for sanity
+            # User should use standard tier for immediate results
+            timeout_seconds = 3600  # 1 hour
+            logger.info(f"Polling with {timeout_seconds}s timeout (model={self.model})...")
+            response = operation.result(timeout=timeout_seconds)
 
             # Extract results
             return self._parse_results(response)
