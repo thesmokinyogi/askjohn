@@ -6,214 +6,66 @@
     <title>Voice-to-Text - Updated 2025 Pricing</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
-        
+
         .container {
-            max-width: 900px;
+            max-width: 700px;
             margin: 0 auto;
             background: white;
             border-radius: 20px;
-            padding: 40px;
+            padding: 30px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
-        
-        h1 { font-size: 32px; margin-bottom: 10px; }
-        .subtitle { color: #666; margin-bottom: 30px; }
-        
-        /* Budget Banner */
+
+        h1 { font-size: 28px; margin-bottom: 8px; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 14px; }
+
+        /* Budget Banner - Compact */
         .budget-banner {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: white;
-            padding: 20px;
-            border-radius: 10px;
+            padding: 12px 15px;
+            border-radius: 8px;
             margin-bottom: 20px;
             display: flex;
             justify-content: space-around;
+            font-size: 13px;
         }
-        
+
         .budget-item { text-align: center; }
-        .budget-label { font-size: 12px; opacity: 0.9; margin-bottom: 5px; }
-        .budget-value { font-size: 20px; font-weight: 700; }
-        
-        /* Upload */
+        .budget-label { font-size: 10px; opacity: 0.9; margin-bottom: 3px; }
+        .budget-value { font-size: 16px; font-weight: 700; }
+
+        /* Upload - Compact */
         .upload-area {
-            border: 3px dashed #667eea;
-            border-radius: 15px;
-            padding: 40px;
+            border: 2px dashed #667eea;
+            border-radius: 12px;
+            padding: 25px;
             text-align: center;
             background: #f8f9ff;
-            margin-bottom: 20px;
-        }
-        
-        .filename { color: #667eea; font-weight: 600; margin-top: 10px; }
-        
-        /* Model Selection */
-        .model-section {
-            margin-bottom: 20px;
-        }
-        
-        .section-header {
-            font-size: 18px;
-            font-weight: 700;
-            color: #333;
             margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e0e7ff;
-        }
-        
-        .model-grid {
-            display: grid;
-            gap: 15px;
-        }
-        
-        .model-card {
-            border: 2px solid #e0e7ff;
-            border-radius: 10px;
-            padding: 20px;
-            background: white;
-            transition: all 0.2s;
             cursor: pointer;
+            transition: all 0.3s;
         }
-        
-        .model-card:hover {
-            border-color: #667eea;
-            background: #f8f9ff;
-        }
-        
-        .model-card.selected {
-            border-color: #667eea;
+
+        .upload-area:hover {
             background: #eef1ff;
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+            border-color: #764ba2;
         }
-        
-        .model-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        
-        .model-name {
-            font-size: 18px;
-            font-weight: 700;
-            color: #333;
-        }
-        
-        .model-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 5px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
-        
-        .badge-recommended { background: #10b981; color: white; }
-        .badge-savings { background: #f59e0b; color: white; }
-        .badge-premium { background: #8b5cf6; color: white; }
-        
-        .model-description {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 15px;
-        }
-        
-        .model-stats {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #e0e7ff;
-        }
-        
-        .stat {
-            text-align: center;
-        }
-        
-        .stat-value {
-            font-size: 18px;
-            font-weight: 700;
-            color: #667eea;
-        }
-        
-        .stat-value.price-highlight {
-            color: #10b981;
-        }
-        
-        .stat-label {
-            font-size: 11px;
-            color: #999;
-            margin-top: 3px;
-        }
-        
-        /* Cost Estimate */
-        .cost-estimate {
-            background: #fef3c7;
-            border: 2px solid #fbbf24;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 20px 0;
-        }
-        
-        .estimate-header {
-            font-size: 16px;
-            font-weight: 700;
-            color: #92400e;
-            margin-bottom: 15px;
-        }
-        
-        .estimate-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-        }
-        
-        .estimate-item {
-            text-align: center;
-        }
-        
-        .estimate-value {
-            font-size: 20px;
-            font-weight: 700;
-            color: #92400e;
-        }
-        
-        .estimate-label {
-            font-size: 11px;
-            color: #92400e;
-            opacity: 0.8;
-            margin-top: 5px;
-        }
-        
-        /* Comparison Note */
-        .comparison-note {
-            background: #e0f2fe;
-            border-left: 4px solid #0284c7;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 5px;
-        }
-        
-        .comparison-title {
-            font-weight: 700;
-            color: #0c4a6e;
-            margin-bottom: 8px;
-        }
-        
-        .comparison-text {
-            color: #075985;
-            font-size: 14px;
-            line-height: 1.6;
-        }
-        
-        /* Button */
-        .btn {
+
+        .upload-icon { font-size: 36px; margin-bottom: 8px; }
+        .upload-text { font-size: 16px; color: #667eea; font-weight: 600; margin-bottom: 5px; }
+        .upload-hint { color: #999; font-size: 12px; }
+        .filename { color: #667eea; font-weight: 600; margin-top: 8px; font-size: 13px; }
+
+        /* Transcribe Button - Primary Position */
+        .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
@@ -223,22 +75,219 @@
             font-weight: 600;
             cursor: pointer;
             width: 100%;
+            margin-bottom: 20px;
+            transition: transform 0.2s;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+        }
+
+        /* Cost Preview - Inline with button */
+        .cost-preview {
+            background: #fef3c7;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .cost-label {
+            color: #92400e;
+            font-weight: 600;
+        }
+
+        .cost-breakdown {
+            color: #92400e;
+            text-align: right;
+        }
+
+        .cost-value {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        /* Collapsible Advanced Options */
+        .advanced-section {
+            margin-top: 15px;
+        }
+
+        .advanced-toggle {
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            transition: all 0.2s;
+        }
+
+        .advanced-toggle:hover {
+            background: #e5e7eb;
+        }
+
+        .toggle-icon {
+            transition: transform 0.3s;
+            font-size: 12px;
+        }
+
+        .toggle-icon.expanded {
+            transform: rotate(180deg);
+        }
+
+        .advanced-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .advanced-content.expanded {
+            max-height: 800px;
+        }
+
+        .advanced-inner {
+            padding: 15px 0;
+        }
+
+        /* Model Selection - Compact Button Style */
+        .section-header {
+            font-size: 14px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e0e7ff;
+        }
+
+        .model-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .model-option {
+            border: 2px solid #e0e7ff;
+            border-radius: 8px;
+            padding: 12px 15px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .model-option:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .model-option.selected {
+            border-color: #667eea;
+            background: #eef1ff;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .model-info {
+            flex: 1;
+        }
+
+        .model-name-line {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 3px;
+        }
+
+        .model-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .model-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .badge-default { background: #10b981; color: white; }
+        .badge-savings { background: #f59e0b; color: white; }
+        .badge-premium { background: #8b5cf6; color: white; }
+        .badge-recommended { background: #3b82f6; color: white; }
+
+        .model-description {
+            color: #666;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .model-cost {
+            text-align: right;
+            padding-left: 15px;
+        }
+
+        .model-price {
+            font-size: 18px;
+            font-weight: 700;
+            color: #10b981;
+            line-height: 1;
+        }
+
+        .model-time {
+            font-size: 11px;
+            color: #999;
+            margin-top: 3px;
+        }
+
+        /* Comparison Note - Compact */
+        .comparison-note {
+            background: #e0f2fe;
+            border-left: 3px solid #0284c7;
+            padding: 10px 12px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        .comparison-title {
+            font-weight: 700;
+            color: #0c4a6e;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+
+        .comparison-text {
+            color: #075985;
+            line-height: 1.5;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🎙️ Voice-to-Text</h1>
-        <p class="subtitle">Updated with 2025 Pricing - Now with 75% cost savings option!</p>
+        <p class="subtitle">75% cost savings with Dynamic Batch processing</p>
 
-        <!-- Budget Display -->
+        <!-- Budget Display - Compact -->
         <div class="budget-banner">
             <div class="budget-item">
-                <div class="budget-label">This Month (Google)</div>
-                <div class="budget-value">$8.40 / $250.00</div>
+                <div class="budget-label">This Month</div>
+                <div class="budget-value">$8.40 / $250</div>
             </div>
             <div class="budget-item">
-                <div class="budget-label">Free Tier (Shared)</div>
+                <div class="budget-label">Free Tier</div>
                 <div class="budget-value">35 / 60 min</div>
             </div>
             <div class="budget-item">
@@ -247,193 +296,203 @@
             </div>
         </div>
 
-        <!-- Upload -->
-        <div class="upload-area">
-            <div style="font-size: 48px; margin-bottom: 10px;">📁</div>
-            <div style="font-size: 18px; color: #667eea; font-weight: 600;">Click to upload or drag & drop</div>
-            <div style="color: #999; font-size: 14px; margin-top: 8px;">Supports: MP3, WAV, M4A, OGG, FLAC</div>
-            <div class="filename">sample-yoga-class.m4a (75 minutes detected)</div>
+        <!-- Upload Area -->
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Click to upload or drag & drop</div>
+            <div class="upload-hint">MP3, WAV, M4A, OGG, FLAC • Up to 8 hours</div>
+            <div class="filename" id="filename">sample-yoga-class.m4a (75 minutes detected)</div>
         </div>
 
-        <!-- Google Cloud Models -->
-        <div class="model-section">
-            <div class="section-header">📍 Google Cloud Speech-to-Text V2 (Current Provider)</div>
-            
-            <div class="model-grid">
-                <!-- Long Audio Standard -->
-                <div class="model-card selected">
-                    <div class="model-header">
-                        <div class="model-name">Long Audio (Standard)</div>
-                        <div class="model-badge badge-recommended">Recommended</div>
-                    </div>
-                    <div class="model-description">
-                        Optimized for recordings over 30 minutes. Perfect for yoga classes, lectures, meetings. 
-                        Results in ~1-3 minutes.
-                    </div>
-                    <div class="model-stats">
-                        <div class="stat">
-                            <div class="stat-value price-highlight">$0.016</div>
-                            <div class="stat-label">per minute</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">$1.20</div>
-                            <div class="stat-label">75-min class</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">~2 min</div>
-                            <div class="stat-label">processing</div>
-                        </div>
-                    </div>
-                </div>
+        <!-- Transcribe Button - Immediately After Upload -->
+        <button class="btn-primary" id="transcribeBtn">
+            Transcribe Audio (Chirp Batch • Est. $0.20)
+        </button>
 
-                <!-- Long Audio Dynamic Batch -->
-                <div class="model-card">
-                    <div class="model-header">
-                        <div class="model-name">Long Audio (Dynamic Batch)</div>
-                        <div class="model-badge badge-savings">75% Savings</div>
-                    </div>
-                    <div class="model-description">
-                        Same quality as Standard, but processing can take up to 24 hours. Great for non-urgent transcriptions.
-                        <strong>Massive cost savings!</strong>
-                    </div>
-                    <div class="model-stats">
-                        <div class="stat">
-                            <div class="stat-value price-highlight">$0.004</div>
-                            <div class="stat-label">per minute</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">$0.30</div>
-                            <div class="stat-label">75-min class</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">up to 24hr</div>
-                            <div class="stat-label">processing</div>
-                        </div>
-                    </div>
-                </div>
+        <!-- Cost Preview -->
+        <div class="cost-preview">
+            <div class="cost-label">📊 Cost Estimate</div>
+            <div class="cost-breakdown">
+                <div style="font-size: 11px; margin-bottom: 2px;">75 min total • 25 min free • 50 min @ $0.004</div>
+                <div class="cost-value">$0.20</div>
+            </div>
+        </div>
 
-                <!-- Chirp Standard -->
-                <div class="model-card">
-                    <div class="model-header">
-                        <div class="model-name">Chirp (Standard)</div>
-                        <div class="model-badge badge-premium">Best Accuracy</div>
-                    </div>
-                    <div class="model-description">
-                        Highest accuracy with speaker diarization. Ideal for podcasts, interviews, multiple speakers.
-                        <strong>No premium pricing!</strong>
-                    </div>
-                    <div class="model-stats">
-                        <div class="stat">
-                            <div class="stat-value price-highlight">$0.016</div>
-                            <div class="stat-label">per minute</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">$1.20</div>
-                            <div class="stat-label">75-min class</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">~2 min</div>
-                            <div class="stat-label">processing</div>
-                        </div>
-                    </div>
-                </div>
+        <!-- Advanced Options - Collapsible -->
+        <div class="advanced-section">
+            <div class="advanced-toggle" id="advancedToggle">
+                <span>⚙️ Advanced Options (Model Selection)</span>
+                <span class="toggle-icon" id="toggleIcon">▼</span>
+            </div>
 
-                <!-- Chirp Dynamic Batch -->
-                <div class="model-card">
-                    <div class="model-header">
-                        <div class="model-name">Chirp (Dynamic Batch)</div>
-                        <div class="model-badge badge-savings">Best + Savings</div>
-                    </div>
-                    <div class="model-description">
-                        Best accuracy with 75% cost savings. Perfect for non-urgent high-quality transcription needs.
-                    </div>
-                    <div class="model-stats">
-                        <div class="stat">
-                            <div class="stat-value price-highlight">$0.004</div>
-                            <div class="stat-label">per minute</div>
+            <div class="advanced-content" id="advancedContent">
+                <div class="advanced-inner">
+                    <!-- Google Cloud Models -->
+                    <div class="section-header">Google Cloud Speech-to-Text V2</div>
+
+                    <div class="model-list">
+                        <!-- Chirp Batch - DEFAULT -->
+                        <div class="model-option selected" onclick="selectModel('chirp_batch', 0.004, 'up to 24hr')">
+                            <div class="model-info">
+                                <div class="model-name-line">
+                                    <div class="model-name">Chirp (Dynamic Batch)</div>
+                                    <div class="model-badge badge-default">Default</div>
+                                    <div class="model-badge badge-savings">75% Off</div>
+                                </div>
+                                <div class="model-description">
+                                    Best accuracy + massive savings • Speaker diarization • Up to 24hr processing
+                                </div>
+                            </div>
+                            <div class="model-cost">
+                                <div class="model-price">$0.004</div>
+                                <div class="model-time">per min</div>
+                            </div>
                         </div>
-                        <div class="stat">
-                            <div class="stat-value">$0.30</div>
-                            <div class="stat-label">75-min class</div>
+
+                        <!-- Long Batch -->
+                        <div class="model-option" onclick="selectModel('long_batch', 0.004, 'up to 24hr')">
+                            <div class="model-info">
+                                <div class="model-name-line">
+                                    <div class="model-name">Long Audio (Dynamic Batch)</div>
+                                    <div class="model-badge badge-savings">75% Off</div>
+                                </div>
+                                <div class="model-description">
+                                    Optimized for 30+ min recordings • Same quality • Up to 24hr processing
+                                </div>
+                            </div>
+                            <div class="model-cost">
+                                <div class="model-price">$0.004</div>
+                                <div class="model-time">per min</div>
+                            </div>
                         </div>
-                        <div class="stat">
-                            <div class="stat-value">up to 24hr</div>
-                            <div class="stat-label">processing</div>
+
+                        <!-- Chirp Standard -->
+                        <div class="model-option" onclick="selectModel('chirp_standard', 0.016, '~2 min')">
+                            <div class="model-info">
+                                <div class="model-name-line">
+                                    <div class="model-name">Chirp (Standard)</div>
+                                    <div class="model-badge badge-premium">Best</div>
+                                </div>
+                                <div class="model-description">
+                                    Best accuracy • Speaker diarization • Fast processing ~1-3 minutes
+                                </div>
+                            </div>
+                            <div class="model-cost">
+                                <div class="model-price">$0.016</div>
+                                <div class="model-time">per min</div>
+                            </div>
+                        </div>
+
+                        <!-- Long Standard -->
+                        <div class="model-option" onclick="selectModel('long_standard', 0.016, '~2 min')">
+                            <div class="model-info">
+                                <div class="model-name-line">
+                                    <div class="model-name">Long Audio (Standard)</div>
+                                </div>
+                                <div class="model-description">
+                                    Optimized for 30+ min recordings • Fast processing ~1-3 minutes
+                                </div>
+                            </div>
+                            <div class="model-cost">
+                                <div class="model-price">$0.016</div>
+                                <div class="model-time">per min</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Comparison Note -->
+                    <div class="comparison-note">
+                        <div class="comparison-title">💡 2025 Pricing Update</div>
+                        <div class="comparison-text">
+                            <strong>Good news!</strong> Google lowered prices and added Dynamic Batch (75% savings).
+                            <br>
+                            <strong>Your 75-min class:</strong> Was $1.80 • Now $1.20 (standard) or <strong>$0.20 (batch!)</strong>
+                        </div>
+                    </div>
+
+                    <!-- Future: Whisper -->
+                    <div class="section-header" style="opacity: 0.6;">Future: OpenAI Whisper (Not Yet Available)</div>
+                    <div class="model-option" style="opacity: 0.6; cursor: not-allowed;">
+                        <div class="model-info">
+                            <div class="model-name-line">
+                                <div class="model-name">Whisper API</div>
+                                <div class="model-badge" style="background: #6b7280; color: white;">Coming Soon</div>
+                            </div>
+                            <div class="model-description">
+                                Even cheaper: $0.006/min • One-time $5 credit • Fast processing
+                            </div>
+                        </div>
+                        <div class="model-cost">
+                            <div class="model-price" style="color: #6b7280;">$0.006</div>
+                            <div class="model-time">per min</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-
-        <!-- Cost Estimate -->
-        <div class="cost-estimate">
-            <div class="estimate-header">📊 Cost Estimate for This File (Long Audio Standard)</div>
-            <div class="estimate-grid">
-                <div class="estimate-item">
-                    <div class="estimate-value">75 min</div>
-                    <div class="estimate-label">Duration</div>
-                </div>
-                <div class="estimate-item">
-                    <div class="estimate-value">25 min</div>
-                    <div class="estimate-label">Free Tier</div>
-                </div>
-                <div class="estimate-item">
-                    <div class="estimate-value">50 min</div>
-                    <div class="estimate-label">Billable</div>
-                </div>
-                <div class="estimate-item">
-                    <div class="estimate-value">$0.80</div>
-                    <div class="estimate-label">Total Cost</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Comparison -->
-        <div class="comparison-note">
-            <div class="comparison-title">💡 Pricing Update (2025)</div>
-            <div class="comparison-text">
-                <strong>Good news!</strong> Google has lowered prices and now includes Chirp (best accuracy) at the standard rate.
-                <br><br>
-                <strong>Old pricing:</strong> Long $0.024/min, Chirp $0.064/min<br>
-                <strong>New pricing:</strong> All models $0.016/min, Dynamic Batch $0.004/min<br>
-                <br>
-                <strong>Your 75-minute class:</strong> Was $1.80, now $1.20 (standard) or <strong>$0.30 (batch savings!)</strong>
-            </div>
-        </div>
-
-        <!-- Future: Whisper Comparison -->
-        <div class="model-section">
-            <div class="section-header">🔮 Future Option: OpenAI Whisper (Not Yet Implemented)</div>
-            
-            <div class="model-grid">
-                <div class="model-card" style="opacity: 0.7;">
-                    <div class="model-header">
-                        <div class="model-name">Whisper API</div>
-                        <div class="model-badge" style="background: #6b7280; color: white;">Coming Soon</div>
-                    </div>
-                    <div class="model-description">
-                        Even cheaper than Google! $0.006/min vs $0.016/min. One-time $5 credit (expires 3 months).
-                    </div>
-                    <div class="model-stats">
-                        <div class="stat">
-                            <div class="stat-value price-highlight">$0.006</div>
-                            <div class="stat-label">per minute</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">$0.45</div>
-                            <div class="stat-label">75-min class</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">~1 min</div>
-                            <div class="stat-label">processing</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Transcribe Button -->
-        <button class="btn">Transcribe Audio ($0.80 estimated)</button>
     </div>
+
+    <script>
+        // Toggle advanced options
+        const toggle = document.getElementById('advancedToggle');
+        const content = document.getElementById('advancedContent');
+        const icon = document.getElementById('toggleIcon');
+
+        toggle.addEventListener('click', () => {
+            content.classList.toggle('expanded');
+            icon.classList.toggle('expanded');
+        });
+
+        // Model selection
+        let selectedModel = {
+            name: 'chirp_batch',
+            cost_per_min: 0.004,
+            processing_time: 'up to 24hr',
+            display_name: 'Chirp Batch'
+        };
+
+        function selectModel(modelName, costPerMin, processingTime) {
+            // Update UI selection
+            document.querySelectorAll('.model-option').forEach(el => {
+                el.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+
+            // Update selected model
+            selectedModel = {
+                name: modelName,
+                cost_per_min: costPerMin,
+                processing_time: processingTime
+            };
+
+            // Update button and cost preview
+            updateCostDisplay();
+        }
+
+        function updateCostDisplay() {
+            const durationMin = 75; // From file metadata
+            const freeTierRemaining = 25; // From budget API
+            const billableMin = Math.max(0, durationMin - freeTierRemaining);
+            const estimatedCost = (billableMin * selectedModel.cost_per_min).toFixed(2);
+
+            // Update button
+            const btn = document.getElementById('transcribeBtn');
+            const displayName = selectedModel.name === 'chirp_batch' ? 'Chirp Batch' :
+                               selectedModel.name === 'long_batch' ? 'Long Batch' :
+                               selectedModel.name === 'chirp_standard' ? 'Chirp Std' :
+                               'Long Std';
+            btn.textContent = `Transcribe Audio (${displayName} • Est. $${estimatedCost})`;
+
+            // Update cost preview
+            const breakdown = document.querySelector('.cost-breakdown > div:first-child');
+            breakdown.textContent = `${durationMin} min total • ${freeTierRemaining} min free • ${billableMin} min @ $${selectedModel.cost_per_min}`;
+
+            const costValue = document.querySelector('.cost-value');
+            costValue.textContent = `$${estimatedCost}`;
+        }
+
+        // Initialize cost display
+        updateCostDisplay();
+    </script>
 </body>
 </html>
