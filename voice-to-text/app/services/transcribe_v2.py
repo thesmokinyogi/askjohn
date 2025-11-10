@@ -33,6 +33,20 @@ class GoogleSpeechV2Service:
     - Timestamp extraction
     """
 
+    # Audio format configuration
+    # Formats supported by AutoDetectDecodingConfig (per Google documentation)
+    AUTO_DETECT_FORMATS = {
+        'wav', 'flac', 'mp3', 'ogg', 'opus', 'webm'
+    }
+
+    # Formats requiring ExplicitDecodingConfig
+    # Maps file extension -> AudioEncoding enum value
+    EXPLICIT_ENCODING_MAP = {
+        'm4a': cloud_speech.ExplicitDecodingConfig.AudioEncoding.M4A_AAC,
+        'mp4': cloud_speech.ExplicitDecodingConfig.AudioEncoding.MP4_AAC,
+        'mov': cloud_speech.ExplicitDecodingConfig.AudioEncoding.MOV_AAC,
+    }
+
     def __init__(self, project_id: str, model: str = "long"):
         """
         Initialize V2 Speech client.
@@ -131,31 +145,44 @@ class GoogleSpeechV2Service:
         Args:
             language_code: Language for recognition
             audio_encoding: Audio file extension (e.g., 'm4a', 'mp3', 'wav').
-                          M4A requires explicit config - not supported by auto-detect.
+                          Determines whether to use auto-detect or explicit decoding.
 
         Returns:
             RecognitionConfig object
         """
-        # V2 API uses simple model names like "long", "short", "chirp_3"
-        # Not full resource paths
         logger.info(f"Building config with model: {self.model}, encoding: {audio_encoding}")
 
-        # Choose decoding config based on audio format
-        # M4A requires explicit config - NOT supported by AutoDetectDecodingConfig
-        # Auto-detect supports: WAV, FLAC, MP3, OGG_OPUS, WEBM_OPUS
-        if audio_encoding and audio_encoding.upper() == 'M4A':
+        # Normalize encoding to lowercase for lookup
+        encoding_lower = audio_encoding.lower() if audio_encoding else None
+
+        # Determine decoding config based on format capabilities
+        if encoding_lower in self.EXPLICIT_ENCODING_MAP:
+            # Format requires explicit encoding configuration
+            audio_encoding_enum = self.EXPLICIT_ENCODING_MAP[encoding_lower]
             decoding_config_kwargs = {
                 'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
-                    encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.M4A_AAC,
+                    encoding=audio_encoding_enum
                 )
             }
-            logger.info("Using ExplicitDecodingConfig for M4A format")
-        else:
-            # Auto-detect for MP3, WAV, FLAC, OGG, WEBM
+            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {audio_encoding_enum.name})")
+
+        elif encoding_lower in self.AUTO_DETECT_FORMATS:
+            # Format supported by auto-detect
             decoding_config_kwargs = {
                 'auto_decoding_config': cloud_speech.AutoDetectDecodingConfig()
             }
-            logger.info("Using AutoDetectDecodingConfig")
+            logger.info(f"Using AutoDetectDecodingConfig for {encoding_lower.upper()}")
+
+        else:
+            # Unknown format - try auto-detect with warning
+            logger.warning(
+                f"Unknown audio format '{audio_encoding}'. "
+                f"Supported formats: {sorted(self.AUTO_DETECT_FORMATS | set(self.EXPLICIT_ENCODING_MAP.keys()))}. "
+                f"Attempting auto-detection..."
+            )
+            decoding_config_kwargs = {
+                'auto_decoding_config': cloud_speech.AutoDetectDecodingConfig()
+            }
 
         # TODO: Fix phrase hints syntax for V2 API
         # V2 has different syntax than V1 for custom vocabulary
@@ -167,7 +194,7 @@ class GoogleSpeechV2Service:
         config = cloud_speech.RecognitionConfig(
             **decoding_config_kwargs,
             language_codes=[language_code],
-            model=self.model,  # Use model name directly, not resource path
+            model=self.model,
             features=cloud_speech.RecognitionFeatures(
                 enable_automatic_punctuation=True,
                 enable_word_time_offsets=True,
