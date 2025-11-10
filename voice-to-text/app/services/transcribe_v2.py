@@ -40,11 +40,12 @@ class GoogleSpeechV2Service:
     }
 
     # Formats requiring ExplicitDecodingConfig
-    # Maps file extension -> AudioEncoding enum value
+    # Maps file extension -> AudioEncoding enum value (using integer values for compatibility)
+    # M4A_AAC = 11, MP4_AAC = 10, MOV_AAC = 12 from AudioEncoding enum
     EXPLICIT_ENCODING_MAP = {
-        'm4a': cloud_speech.ExplicitDecodingConfig.AudioEncoding.M4A_AAC,
-        'mp4': cloud_speech.ExplicitDecodingConfig.AudioEncoding.MP4_AAC,
-        'mov': cloud_speech.ExplicitDecodingConfig.AudioEncoding.MOV_AAC,
+        'm4a': 11,  # AudioEncoding.M4A_AAC
+        'mp4': 10,  # AudioEncoding.MP4_AAC
+        'mov': 12,  # AudioEncoding.MOV_AAC
     }
 
     def __init__(self, project_id: str, model: str = "long"):
