@@ -254,53 +254,26 @@ class GoogleSpeechV2Service:
             Structured dict with transcript and metadata
         """
         try:
-            # DEBUG: Log response structure
-            logger.info(f"Response type: {type(response)}")
-            logger.info(f"Response has results: {hasattr(response, 'results')}")
-
-            # Check for response-level metadata/errors
-            if hasattr(response, 'total_billed_duration'):
-                logger.info(f"Total billed duration: {response.total_billed_duration}")
-
-            if hasattr(response, 'results'):
-                logger.info(f"Results type: {type(response.results)}")
-                logger.info(f"Results length: {len(response.results) if response.results else 0}")
-                logger.info(f"Results keys: {list(response.results.keys()) if response.results else []}")
-
             # Extract results from response
-            # V2 response structure is different from V1
             results = []
             total_confidence = 0.0
             word_details = []
 
             # Iterate through results (keyed by GCS URI)
             for uri, result in response.results.items():
-                logger.info(f"Processing URI: {uri}")
-                logger.info(f"Result type: {type(result)}")
-
                 # Check for errors FIRST (before looking at transcript)
                 if hasattr(result, 'error') and result.error.code != 0:
                     logger.error(f"Google returned error for {uri}: {result.error}")
                     continue
 
-                # Now check transcript
-                logger.info(f"Result has transcript: {hasattr(result, 'transcript')}")
-                if hasattr(result, 'transcript'):
-                    logger.info(f"Transcript object: {result.transcript}")
-                    logger.info(f"Transcript is None: {result.transcript is None}")
-                    if result.transcript:
-                        logger.info(f"Transcript value: {str(result.transcript)[:200]}")  # First 200 chars
-
+                # Log metadata if present (shows billed duration)
                 if hasattr(result, 'metadata'):
-                    logger.info(f"Result metadata: {result.metadata}")
+                    logger.info(f"Billed duration: {result.metadata.total_billed_duration}")
 
                 # Parse transcript if present
                 if hasattr(result, 'transcript') and result.transcript:
-                    logger.info(f"Transcript type: {type(result.transcript)}")
-                    logger.info(f"Transcript has results: {hasattr(result.transcript, 'results')}")
-
                     if hasattr(result.transcript, 'results'):
-                        logger.info(f"Transcript results count: {len(result.transcript.results)}")
+                        segment_count = len(result.transcript.results)
 
                         for batch_result in result.transcript.results:
                             if batch_result.alternatives:
@@ -317,6 +290,8 @@ class GoogleSpeechV2Service:
                                         "end_time": word_info.end_offset.total_seconds(),
                                         "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
                                     })
+
+                        logger.info(f"Processed {segment_count} segments, {len(word_details)} words")
                 else:
                     logger.warning(f"No transcript found in result for {uri}")
 
