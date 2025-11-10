@@ -39,13 +39,25 @@ class GoogleSpeechV2Service:
         'wav', 'flac', 'mp3', 'ogg', 'opus', 'webm'
     }
 
+    # AudioEncoding values - try library enum first, fall back to integers
+    # Trust the library as source of truth when available
+    try:
+        M4A_AAC = cloud_speech.ExplicitDecodingConfig.AudioEncoding.M4A_AAC
+        MP4_AAC = cloud_speech.ExplicitDecodingConfig.AudioEncoding.MP4_AAC
+        MOV_AAC = cloud_speech.ExplicitDecodingConfig.AudioEncoding.MOV_AAC
+    except AttributeError:
+        # Fallback for older library versions without enum attributes
+        # Values from Google Speech V2 API specification
+        M4A_AAC = 11
+        MP4_AAC = 10
+        MOV_AAC = 12
+
     # Formats requiring ExplicitDecodingConfig
-    # Maps file extension -> AudioEncoding enum value (using integer values for compatibility)
-    # M4A_AAC = 11, MP4_AAC = 10, MOV_AAC = 12 from AudioEncoding enum
+    # Maps file extension -> AudioEncoding value (enum or int)
     EXPLICIT_ENCODING_MAP = {
-        'm4a': 11,  # AudioEncoding.M4A_AAC
-        'mp4': 10,  # AudioEncoding.MP4_AAC
-        'mov': 12,  # AudioEncoding.MOV_AAC
+        'm4a': M4A_AAC,
+        'mp4': MP4_AAC,
+        'mov': MOV_AAC,
     }
 
     def __init__(self, project_id: str, model: str = "long"):
@@ -159,13 +171,15 @@ class GoogleSpeechV2Service:
         # Determine decoding config based on format capabilities
         if encoding_lower in self.EXPLICIT_ENCODING_MAP:
             # Format requires explicit encoding configuration
-            audio_encoding_enum = self.EXPLICIT_ENCODING_MAP[encoding_lower]
+            audio_encoding_value = self.EXPLICIT_ENCODING_MAP[encoding_lower]
             decoding_config_kwargs = {
                 'explicit_decoding_config': cloud_speech.ExplicitDecodingConfig(
-                    encoding=audio_encoding_enum
+                    encoding=audio_encoding_value
                 )
             }
-            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {audio_encoding_enum.name})")
+            # Handle both enum objects (with .name) and integers (without)
+            encoding_name = getattr(audio_encoding_value, 'name', audio_encoding_value)
+            logger.info(f"Using ExplicitDecodingConfig for {encoding_lower.upper()} (encoding: {encoding_name})")
 
         elif encoding_lower in self.AUTO_DETECT_FORMATS:
             # Format supported by auto-detect
