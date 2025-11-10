@@ -55,9 +55,14 @@ class CloudStorageService:
         Returns:
             GCS URI (gs://bucket-name/path/to/file.ext)
         """
+        # Sanitize filename - replace spaces and special chars with underscores
+        # Keep only alphanumeric, dots, hyphens, underscores
+        import re
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+
         # Create unique path with timestamp to avoid collisions
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        blob_name = f"uploads/{timestamp}_{filename}"
+        blob_name = f"uploads/{timestamp}_{safe_filename}"
 
         # Upload to GCS
         blob = self.bucket.blob(blob_name)
@@ -148,7 +153,7 @@ class CloudStorageService:
 
         content_types = {
             "mp3": "audio/mpeg",
-            "m4a": "audio/mp4",
+            "m4a": "audio/mp4",  # M4A is audio-only MP4
             "wav": "audio/wav",
             "flac": "audio/flac",
             "ogg": "audio/ogg",

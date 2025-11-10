@@ -86,10 +86,12 @@ class GoogleSpeechV2Service:
             config = self._build_config(language_code)
 
             # Create recognition request
+            file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
+
             request = cloud_speech.BatchRecognizeRequest(
                 recognizer=f"projects/{self.project_id}/locations/global/recognizers/_",
                 config=config,
-                files=[cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)],
+                files=[file_metadata],
                 recognition_output_config=cloud_speech.RecognitionOutputConfig(
                     inline_response_config=cloud_speech.InlineOutputConfig()
                 ),
@@ -97,6 +99,8 @@ class GoogleSpeechV2Service:
 
             # Start batch recognition (async operation)
             logger.info(f"Starting batch recognition for: {gcs_uri}")
+            logger.info(f"File metadata: {file_metadata}")
+            logger.info(f"Config: auto_decoding={hasattr(config, 'auto_decoding_config')}, model={config.model}, lang={config.language_codes}")
             operation = self.client.batch_recognize(request=request)
 
             # Poll until complete
