@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice-to-Text - UI Mockup with Model Selection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        /* Budget Display */
+        .budget-banner {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .budget-banner.warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .budget-banner.danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .budget-info {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+
+        .budget-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .budget-label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 3px;
+        }
+
+        .budget-value {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            background: #f8f9ff;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            background: #eef1ff;
+            border-color: #764ba2;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .upload-text {
+            color: #667eea;
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            color: #999;
+            font-size: 14px;
+        }
+
+        .filename {
+            color: #667eea;
+            font-weight: 600;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        /* Advanced Options - Collapsible */
+        .advanced-section {
+            margin-bottom: 20px;
+        }
+
+        .advanced-toggle {
+            background: #f8f9ff;
+            border: 1px solid #e0e7ff;
+            border-radius: 10px;
+            padding: 15px 20px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+
+        .advanced-toggle:hover {
+            background: #eef1ff;
+        }
+
+        .advanced-toggle-text {
+            font-weight: 600;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .toggle-icon {
+            font-size: 20px;
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-icon.expanded {
+            transform: rotate(180deg);
+        }
+
+        .advanced-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .advanced-content.expanded {
+            max-height: 800px;
+            padding-top: 20px;
+        }
+
+        /* Model Selection */
+        .model-selection {
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 20px;
+        }
+
+        .model-header {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .model-option {
+            background: white;
+            border: 2px solid #e0e7ff;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            gap: 15px;
+            align-items: flex-start;
+        }
+
+        .model-option:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .model-option.selected {
+            border-color: #667eea;
+            background: #eef1ff;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        .model-radio {
+            margin-top: 3px;
+            width: 20px;
+            height: 20px;
+            accent-color: #667eea;
+        }
+
+        .model-details {
+            flex: 1;
+        }
+
+        .model-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .model-recommended {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+
+        .model-description {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .model-features {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 10px;
+        }
+
+        .model-pricing {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+        }
+
+        .pricing-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pricing-label {
+            color: #999;
+            font-size: 11px;
+            margin-bottom: 2px;
+        }
+
+        .pricing-value {
+            color: #667eea;
+            font-weight: 700;
+        }
+
+        .pricing-value.free {
+            color: #10b981;
+        }
+
+        /* Cost Estimate */
+        .cost-estimate {
+            background: #fef3c7;
+            border: 2px solid #fbbf24;
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .cost-estimate.visible {
+            display: block;
+        }
+
+        .estimate-header {
+            font-size: 14px;
+            font-weight: 600;
+            color: #92400e;
+            margin-bottom: 10px;
+        }
+
+        .estimate-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .estimate-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .estimate-label {
+            font-size: 11px;
+            color: #92400e;
+            opacity: 0.8;
+            margin-bottom: 3px;
+        }
+
+        .estimate-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #92400e;
+        }
+
+        /* Budget Warning */
+        .budget-warning {
+            background: #fee;
+            border: 2px solid #fcc;
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .budget-warning.visible {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .warning-icon {
+            font-size: 32px;
+        }
+
+        .warning-content {
+            flex: 1;
+        }
+
+        .warning-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #c33;
+            margin-bottom: 5px;
+        }
+
+        .warning-text {
+            font-size: 14px;
+            color: #c33;
+        }
+
+        /* Button */
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s ease;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn.warning-override {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Voice-to-Text</h1>
+        <p class="subtitle">Upload audio files of any length with intelligent cost management</p>
+
+        <!-- Budget Display -->
+        <div class="budget-banner" id="budgetBanner">
+            <div class="budget-info">
+                <div class="budget-item">
+                    <div class="budget-label">This Month</div>
+                    <div class="budget-value">$12.60 / $250.00</div>
+                </div>
+                <div class="budget-item">
+                    <div class="budget-label">Free Tier</div>
+                    <div class="budget-value">35 / 60 min</div>
+                </div>
+                <div class="budget-item">
+                    <div class="budget-label">Remaining Budget</div>
+                    <div class="budget-value">$237.40</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Area -->
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Click to upload or drag & drop</div>
+            <div class="upload-hint">Supports: MP3, WAV, M4A, OGG, FLAC • Any length up to 8 hours • Max 500MB</div>
+            <div class="filename" id="filename">sample-yoga-class.m4a (75 minutes detected)</div>
+        </div>
+
+        <!-- Advanced Options (Collapsible) -->
+        <div class="advanced-section">
+            <div class="advanced-toggle" id="advancedToggle">
+                <div class="advanced-toggle-text">
+                    <span>⚙️</span>
+                    <span>Model Selection & Cost Options</span>
+                </div>
+                <div class="toggle-icon" id="toggleIcon">▼</div>
+            </div>
+
+            <div class="advanced-content" id="advancedContent">
+                <div class="model-selection">
+                    <div class="model-header">Choose Transcription Model</div>
+
+                    <!-- Long Model (Default) -->
+                    <div class="model-option selected">
+                        <input type="radio" name="model" value="long" class="model-radio" checked>
+                        <div class="model-details">
+                            <div class="model-name">
+                                Long Audio Model
+                                <span class="model-recommended">RECOMMENDED</span>
+                            </div>
+                            <div class="model-description">
+                                Optimized for recordings over 30 minutes. Best for yoga classes, lectures, meetings.
+                            </div>
+                            <div class="model-features">
+                                ✓ Optimized for long-form content • ✓ Great accuracy • ✓ Cost-effective
+                            </div>
+                            <div class="model-pricing">
+                                <div class="pricing-item">
+                                    <div class="pricing-label">Cost per minute</div>
+                                    <div class="pricing-value">$0.024</div>
+                                </div>
+                                <div class="pricing-item">
+                                    <div class="pricing-label">Free tier (monthly)</div>
+                                    <div class="pricing-value free">60 minutes</div>
+                                </div>
+                                <div class="pricing-item">
+                                    <div class="pricing-label">75-min class</div>
+                                    <div class="pricing-value">$1.80</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chirp 3 Model -->
+                    <div class="model-option">
+                        <input type="radio" name="model" value="chirp_3" class="model-radio">
+                        <div class="model-details">
+                            <div class="model-name">Chirp 3 Model</div>
+                            <div class="model-description">
+                                Highest accuracy with speaker diarization. Best for podcasts, interviews, multiple speakers.
+                            </div>
+                            <div class="model-features">
+                                ✓ Best accuracy • ✓ Speaker identification • ✓ Multilingual support
+                            </div>
+                            <div class="model-pricing">
+                                <div class="pricing-item">
+                                    <div class="pricing-label">Cost per minute</div>
+                                    <div class="pricing-value">$0.064</div>
+                                </div>
+                                <div class="pricing-item">
+                                    <div class="pricing-label">Free tier (monthly)</div>
+                                    <div class="pricing-value free">60 minutes</div>
+                                </div>
+                                <div class="pricing-item">
+                                    <div class="pricing-label">75-min class</div>
+                                    <div class="pricing-value">$4.80</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Short Model -->
+                    <div class="model-option">
+                        <input type="radio" name="model" value="short" class="model-radio">
+                        <div class="model-details">
+                            <div class="model-name">Short Audio Model</div>
+                            <div class="model-description">
+                                Optimized for clips under 30 seconds. Best for voice memos, quick recordings.
+                            </div>
+                            <div class="model-features">
+                                ✓ Optimized for short clips • ✓ Fast processing • ✓ Same pricing as Long
+                            </div>
+                            <div class="model-pricing">
+                                <div class="pricing-item">
+                                    <div class="pricing-label">Cost per minute</div>
+                                    <div class="pricing-value">$0.024</div>
+                                </div>
+                                <div class="pricing-item">
+                                    <div class="pricing-label">Free tier (monthly)</div>
+                                    <div class="pricing-value free">60 minutes</div>
+                                </div>
+                                <div class="pricing-item">
+                                    <div class="pricing-label">75-min class</div>
+                                    <div class="pricing-value">$1.80</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cost Estimate (shown after file selected) -->
+                    <div class="cost-estimate visible">
+                        <div class="estimate-header">📊 Cost Estimate for This File</div>
+                        <div class="estimate-details">
+                            <div class="estimate-item">
+                                <div class="estimate-label">Duration Detected</div>
+                                <div class="estimate-value">75 minutes</div>
+                            </div>
+                            <div class="estimate-item">
+                                <div class="estimate-label">Free Tier Applied</div>
+                                <div class="estimate-value">25 minutes</div>
+                            </div>
+                            <div class="estimate-item">
+                                <div class="estimate-label">Billable Minutes</div>
+                                <div class="estimate-value">50 minutes</div>
+                            </div>
+                            <div class="estimate-item">
+                                <div class="estimate-label">Estimated Cost</div>
+                                <div class="estimate-value">$1.20</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Budget Warning (shown when estimate exceeds remaining) -->
+                    <div class="budget-warning">
+                        <div class="warning-icon">⚠️</div>
+                        <div class="warning-content">
+                            <div class="warning-title">Budget Warning</div>
+                            <div class="warning-text">
+                                This transcription will cost $4.80, leaving you with $232.60 remaining this month.
+                                You're approaching 95% of your monthly budget.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transcribe Button -->
+        <button class="btn" id="transcribeBtn">
+            Transcribe Audio
+        </button>
+
+        <!-- Would show this if budget exceeded -->
+        <!-- <button class="btn warning-override" id="transcribeBtn">
+            ⚠️ Transcribe Anyway (Exceeds Budget)
+        </button> -->
+    </div>
+
+    <script>
+        // Toggle advanced options
+        const advancedToggle = document.getElementById('advancedToggle');
+        const advancedContent = document.getElementById('advancedContent');
+        const toggleIcon = document.getElementById('toggleIcon');
+
+        advancedToggle.addEventListener('click', () => {
+            advancedContent.classList.toggle('expanded');
+            toggleIcon.classList.toggle('expanded');
+        });
+
+        // Model selection
+        const modelOptions = document.querySelectorAll('.model-option');
+        modelOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                modelOptions.forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                const radio = option.querySelector('input[type="radio"]');
+                radio.checked = true;
+
+                // Recalculate cost estimate when model changes
+                updateCostEstimate();
+            });
+        });
+
+        function updateCostEstimate() {
+            // This would call backend to get actual cost estimate
+            // based on selected model and file duration
+            console.log('Updating cost estimate...');
+        }
+
+        // In real implementation, would detect file duration here
+        // using Web Audio API when file is selected
+    </script>
+</body>
+</html>
