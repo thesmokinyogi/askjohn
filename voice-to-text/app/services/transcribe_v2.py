@@ -351,7 +351,7 @@ class GoogleSpeechV2Service:
                 }
 
             # Job is done - check for errors first
-            if operation.error.code != 0:
+            if hasattr(operation, 'error') and operation.error and operation.error.code != 0:
                 # Operation completed with error
                 error_message = f"Google error {operation.error.code}: {operation.error.message}"
                 logger.error(f"Job {job_id} failed: {error_message}")
@@ -368,6 +368,19 @@ class GoogleSpeechV2Service:
             # Job completed successfully - parse results
             # operation.response contains the BatchRecognizeResponse
             logger.info(f"Job {job_id} completed successfully, parsing results...")
+
+            if not hasattr(operation, 'response') or not operation.response:
+                logger.error(f"Job {job_id} completed but has no response data")
+                return {
+                    "done": True,
+                    "status": "failed",
+                    "transcript": None,
+                    "confidence": None,
+                    "words": None,
+                    "error": "Operation completed but response is empty",
+                    "metadata": None
+                }
+
             results = self._parse_results(operation.response)
 
             # Add done flag to results
