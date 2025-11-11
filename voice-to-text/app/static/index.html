@@ -818,21 +818,33 @@
 
                 const estimate = await response.json();
 
-                // Update cost preview
+                // Check if cost is covered by free tier
+                const isFree = estimate.total_cost === 0 && estimate.free_minutes_used > 0;
+
+                // Update cost preview breakdown
                 document.getElementById('costBreakdown').textContent =
                     `${Math.round(estimate.total_minutes)} min total • ` +
                     `${Math.round(estimate.free_minutes_used)} min free • ` +
-                    `${Math.round(estimate.billable_minutes)} min @ $${estimate.cost_per_minute}`;
+                    `${Math.round(estimate.billable_minutes)} min billable @ $${estimate.cost_per_minute}/min`;
 
-                document.getElementById('costValue').textContent =
-                    `$${estimate.total_cost.toFixed(2)}`;
+                // Update cost value - show "FREE" if covered by free tier
+                const costValueEl = document.getElementById('costValue');
+                if (isFree) {
+                    costValueEl.innerHTML = `<span style="color: #10b981; font-weight: 700;">FREE</span> <span style="font-size: 12px; color: #059669;">(covered by free tier)</span>`;
+                } else {
+                    costValueEl.textContent = `$${estimate.total_cost.toFixed(2)}`;
+                }
 
                 // Update button text
                 const modelName = selectedModel === 'chirp_batch' ? 'Chirp Batch' :
                                  selectedModel === 'long_batch' ? 'Long Batch' :
                                  selectedModel === 'chirp_standard' ? 'Chirp Std' : 'Long Std';
-                transcribeBtn.textContent =
-                    `Transcribe Audio (${modelName} • Est. $${estimate.total_cost.toFixed(2)})`;
+
+                if (isFree) {
+                    transcribeBtn.textContent = `Transcribe Audio (${modelName} • FREE)`;
+                } else {
+                    transcribeBtn.textContent = `Transcribe Audio (${modelName} • Est. $${estimate.total_cost.toFixed(2)})`;
+                }
 
                 costPreview.classList.add('active');
 
