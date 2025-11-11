@@ -618,12 +618,16 @@ class GoogleSpeechV2Service:
                     if hasattr(result, 'metadata'):
                         logger.info(f"Billed duration: {result.metadata.total_billed_duration}")
 
-                    # Parse transcript if present
-                    if hasattr(result, 'transcript') and result.transcript:
-                        if hasattr(result.transcript, 'results'):
-                            segment_count = len(result.transcript.results)
+                    # V2 API: Parse inline_result (used with inline_response_config)
+                    # Structure: result.inline_result.transcript.results[]
+                    if hasattr(result, 'inline_result') and result.inline_result:
+                        inline_result = result.inline_result
+                        if hasattr(inline_result, 'transcript') and inline_result.transcript:
+                            transcript_results = inline_result.transcript.results
+                            segment_count = len(transcript_results) if transcript_results else 0
+                            logger.info(f"Found {segment_count} transcript segments")
 
-                            for batch_result in result.transcript.results:
+                            for batch_result in transcript_results:
                                 if batch_result.alternatives:
                                     alternative = batch_result.alternatives[0]
 
@@ -631,17 +635,20 @@ class GoogleSpeechV2Service:
                                     total_confidence += alternative.confidence
 
                                     # Extract word-level details
-                                    for word_info in alternative.words:
-                                        word_details.append({
-                                            "word": word_info.word,
-                                            "start_time": word_info.start_offset.total_seconds(),
-                                            "end_time": word_info.end_offset.total_seconds(),
-                                            "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
-                                        })
+                                    if hasattr(alternative, 'words'):
+                                        for word_info in alternative.words:
+                                            word_details.append({
+                                                "word": word_info.word,
+                                                "start_time": word_info.start_offset.total_seconds(),
+                                                "end_time": word_info.end_offset.total_seconds(),
+                                                "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
+                                            })
 
                             logger.info(f"Processed {segment_count} segments, {len(word_details)} words")
+                        else:
+                            logger.warning(f"inline_result has no transcript for {uri_or_idx}")
                     else:
-                        logger.warning(f"No transcript found in result for {uri_or_idx}")
+                        logger.warning(f"No inline_result found for {uri_or_idx}")
 
             # Combine results
             full_transcript = " ".join(results)
