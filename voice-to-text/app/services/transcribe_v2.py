@@ -60,16 +60,19 @@ class GoogleSpeechV2Service:
         'mov': MOV_AAC,
     }
 
-    def __init__(self, project_id: str, model: str = "long"):
+    def __init__(self, project_id: str, model: str = "long", location: str = "us"):
         """
         Initialize V2 Speech client.
 
         Args:
             project_id: Google Cloud project ID
             model: Model to use (chirp_3, long, short)
+            location: Google Cloud location (default: us)
+                     V2 models require regional location, not 'global'
         """
         self.project_id = project_id
         self.model = model
+        self.location = location
         self.client = SpeechClient()
 
         # Yoga-specific vocabulary for better recognition
@@ -95,7 +98,7 @@ class GoogleSpeechV2Service:
             "vinyasa", "hatha", "yin", "restorative"
         ]
 
-        logger.info(f"Initialized Speech V2 service: model={model}, project={project_id}")
+        logger.info(f"Initialized Speech V2 service: model={model}, location={location}, project={project_id}")
 
     def submit_job(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None):
         """
@@ -125,7 +128,7 @@ class GoogleSpeechV2Service:
             # Create batch recognition request
             file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
             request = cloud_speech.BatchRecognizeRequest(
-                recognizer=f"projects/{self.project_id}/locations/global/recognizers/_",
+                recognizer=f"projects/{self.project_id}/locations/{self.location}/recognizers/_",
                 config=config,
                 files=[file_metadata],
                 recognition_output_config=cloud_speech.RecognitionOutputConfig(
@@ -263,7 +266,7 @@ class GoogleSpeechV2Service:
             file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
 
             request = cloud_speech.BatchRecognizeRequest(
-                recognizer=f"projects/{self.project_id}/locations/global/recognizers/_",
+                recognizer=f"projects/{self.project_id}/locations/{self.location}/recognizers/_",
                 config=config,
                 files=[file_metadata],
                 recognition_output_config=cloud_speech.RecognitionOutputConfig(
@@ -475,15 +478,17 @@ class GoogleSpeechV2Service:
             }
 
 
-def get_transcription_service_v2(project_id: str, model: str = "long") -> GoogleSpeechV2Service:
+def get_transcription_service_v2(project_id: str, model: str = "long", location: str = "us") -> GoogleSpeechV2Service:
     """
     Factory function to create V2 transcription service.
 
     Args:
         project_id: Google Cloud project ID
         model: Model to use (chirp_3, long, short)
+        location: Google Cloud location (default: us)
+                 V2 models require regional location, not 'global'
 
     Returns:
         GoogleSpeechV2Service instance
     """
-    return GoogleSpeechV2Service(project_id=project_id, model=model)
+    return GoogleSpeechV2Service(project_id=project_id, model=model, location=location)
