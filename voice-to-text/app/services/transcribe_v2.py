@@ -20,6 +20,7 @@ V2 Regional Architecture:
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech
 from google.api_core.client_options import ClientOptions
+from google.api_core import operations_v1
 from typing import Dict, Optional
 import logging
 import time
@@ -326,7 +327,11 @@ class GoogleSpeechV2Service:
             # This is Google's way of letting us check on jobs we submitted earlier
             # The operation name is stable - we can use it hours or days later
             logger.info(f"Checking status for job: {job_id}")
-            operation = self.client.get_operation(name=job_id)
+
+            # Use the operations client to check status
+            # V2 requires using the operations_v1 client, not a method on SpeechClient
+            operations_client = operations_v1.OperationsClient(self.client._transport.grpc_channel)
+            operation = operations_client.get_operation(job_id)
 
             # Check if operation is done (non-blocking check)
             # This returns immediately - doesn't wait for completion
