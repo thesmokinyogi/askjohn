@@ -1,0 +1,688 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;\f1\fswiss\fcharset0 Helvetica-Bold;}
+{\colortbl;\red255\green255\blue255;\red21\green21\blue22;\red52\green55\blue54;\red228\green234\blue244;
+\red255\green255\blue255;\red246\green249\blue252;\red236\green241\blue247;\red109\green109\blue109;\red111\green14\blue195;
+\red24\green112\blue43;\red134\green86\blue3;\red22\green79\blue199;\red77\green80\blue85;\red164\green69\blue11;
+}
+{\*\expandedcolortbl;;\cssrgb\c10588\c10980\c11373;\cssrgb\c26667\c27843\c27451;\cssrgb\c91373\c93333\c96471;
+\cssrgb\c100000\c100000\c100000;\cssrgb\c97255\c98039\c99216;\cssrgb\c94118\c95686\c97647;\cssrgb\c50196\c50196\c50196;\cssrgb\c51765\c18824\c80784;
+\cssrgb\c9412\c50196\c21961;\cssrgb\c60000\c41176\c0;\cssrgb\c9804\c40392\c82353;\cssrgb\c37255\c38824\c40784;\cssrgb\c70980\c34902\c3137;
+}
+{\*\listtable{\list\listtemplateid1\listhybrid{\listlevel\levelnfc0\levelnfcn0\leveljc0\leveljcn0\levelfollow0\levelstartat1\levelspace360\levelindent0{\*\levelmarker \{decimal\}}{\leveltext\leveltemplateid1\'01\'00;}{\levelnumbers\'01;}\fi-360\li720\lin720 }{\listname ;}\listid1}}
+{\*\listoverridetable{\listoverride\listid1\listoverridecount0\ls1}}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\fs24 \cf2 \expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 \
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs48 \cf2 Resolving the Google Cloud Speech-to-Text V2 Location Paradox for Chirp Models\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+This report provides a comprehensive analysis of the Google Cloud Speech-to-Text (STT) V2 API location requirements, specifically addressing the contradiction encountered when using high-performance models like Chirp in conjunction with regional resource paths and the \cf3 \cb4 \strokec3 batch_recognize\cf2 \cb1 \strokec2  method. The analysis clarifies the strict coupling between client configuration and resource naming required for V2, details programmatic model discovery, and offers prescriptive Python implementations for regional operations in 2025.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs36 \cf2 I. Executive Summary: Resolving the V2 Location Paradox\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 1.1 The Inherent Regionalization of Speech-to-Text V2 and Chirp\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The Google Cloud Speech-to-Text V2 API was fundamentally designed to meet heightened enterprise security and regulatory needs, focusing specifically on data residency and compliance.
+\fs32 \cf3 \cb5 \super \strokec3 1
+\fs24 \cf2 \cb1 \nosupersub \strokec2  This architectural evolution moved away from the V1 API\'92s largely global abstraction toward a strictly regionalized service structure.\
+The core promise of V2 is data residency, which ensures that resource generation, logging, and data processing remain entirely within designated geographical boundaries (e.g., Singapore, Belgium, or specific US regions).
+\fs32 \cf3 \cb5 \super \strokec3 1
+\fs24 \cf2 \cb1 \nosupersub \strokec2  This capability is intrinsically tied to the V2 infrastructure.\
+The Chirp family of models (\cf3 \cb4 \strokec3 chirp\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 chirp_2\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 chirp_3\cf2 \cb1 \strokec2 ) are Google\'92s advanced, multilingual, LLM-powered Automatic Speech Recognition (ASR) systems, available exclusively within V2.
+\fs32 \cf3 \cb5 \super \strokec3 3
+\fs24 \cf2 \cb1 \nosupersub \strokec2  Their General Availability (GA) is strictly limited to specific, announced regions, such as \cf3 \cb4 \strokec3 us-central1\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 europe-west4\cf2 \cb1 \strokec2 , and \cf3 \cb4 \strokec3 asia-southeast1\cf2 \cb1 \strokec2 .
+\fs32 \cf3 \cb5 \super \strokec3 3
+\fs24 \cf2 \cb1 \nosupersub \strokec2  This limitation confirms that Chirp models are inherently regional offerings. Consequently, any deployment requiring Chirp must utilize the regionalized V2 architecture to access the underlying specialized infrastructure.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 1.2 Causal Analysis of the $400$ InvalidArgument Contradiction\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The error message, $400$ Expected resource location to be global, but found us-west1 in resource name, signals a validation failure at the network ingress layer rather than an intrinsic requirement for Chirp to be global.
+\fs32 \cf3 \cb5 \super \strokec3 7
+\fs24 \cf2 \cb1 \nosupersub \strokec2  The system's behavior reflects a configuration mismatch between how the client connects to the service and how the resource path is constructed.\
+The standard initialization of the Python \cf3 \cb4 \strokec3 SpeechClient()\cf2 \cb1 \strokec2  often defaults to the global API endpoint (\cf3 \cb4 \strokec3 speech.googleapis.com\cf2 \cb1 \strokec2 ) unless explicitly overridden.
+\fs32 \cf3 \cb5 \super \strokec3 8
+\fs24 \cf2 \cb1 \nosupersub \strokec2  This global service ingress layer is configured to route traffic destined for general V2 features and standard models (like \cf3 \cb4 \strokec3 long\cf2 \cb1 \strokec2 ) which are allowed to use the global resource path, such as \cf3 \cb4 \strokec3 locations/global/recognizers/_\cf2 \cb1 \strokec2 .
+\fs32 \cf3 \cb5 \super \strokec3 5
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+When the global ingress service receives a request that attempts to define a regional resource path (e.g., \cf3 \cb4 \strokec3 projects/\{P\}/locations/us-west1/...\cf2 \cb1 \strokec2 ), it cannot successfully validate or route that request to the corresponding regional control plane. The global endpoint operates outside of that siloed regional boundary and lacks the necessary internal context to guarantee regional execution or data residency commitments. Therefore, the service rejects the request and defaults to demanding conformance with the path it serves, which is \cf3 \cb4 \strokec3 global\cf2 \cb1 \strokec2 .
+\fs32 \cf3 \cb5 \super \strokec3 7
+\fs24 \cf2 \cb1 \nosupersub \strokec2  The failure occurs because the client attempted to use a regional resource name without first establishing a regional network connection. The resolution is the explicit alignment of the client's network endpoint with the resource\'92s specified region.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 1.3 Immediate Architectural Resolution for Regional Operations\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The solution to the $400$ error mandates establishing the client connection via the corresponding regional service boundary that matches the desired Recognizer resource location.\
+To operate successfully with Chirp or any regional V2 resource, the \cf3 \cb4 \strokec3 SpeechClient\cf2 \cb1 \strokec2  must be initialized using a regional endpoint, formatted as \cf3 \cb4 \strokec3 \{REGION\}-speech.googleapis.com\cf2 \cb1 \strokec2  (e.g., \cf3 \cb4 \strokec3 us-central1-speech.googleapis.com\cf2 \cb1 \strokec2 ).
+\fs32 \cf3 \cb5 \super \strokec3 2
+\fs24 \cf2 \cb1 \nosupersub \strokec2  Subsequently, the Recognizer resource path used in the transcription request must specify the exact matching region (e.g., \cf3 \cb4 \strokec3 projects/\{P\}/locations/us-central1/recognizers/_\cf2 \cb1 \strokec2 ).\
+The following table summarizes the mandatory dependency between client configuration and resource path for V2 operations:\
+Location Parameter Dependency in Speech V2 API\
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2921\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2160
+\clvertalc \clcbpat6 \clwWidth2359\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx4320
+\clvertalc \clcbpat6 \clwWidth3046\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6480
+\clvertalc \clcbpat6 \clwWidth4773\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Client Endpoint (ClientOptions)
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Required Recognizer Path Location (\{L\})
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Supported Model Capability
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Rationale
+\f0\b0 \cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2921\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2160
+\clvertalc \clcbpat6 \clwWidth2359\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx4320
+\clvertalc \clcbpat6 \clwWidth3046\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6480
+\clvertalc \clcbpat6 \clwWidth4773\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Default (\cf3 \cb4 \strokec3 speech.googleapis.com\cf2 \cb1 \strokec2 )\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 global\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Standard V2 Models (e.g., \cf3 \cb4 \strokec3 long\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 short\cf2 \cb1 \strokec2 )\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Uses global routing abstraction; regional models like Chirp are unavailable or fail validation.\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrt\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2921\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2160
+\clvertalc \clcbpat6 \clwWidth2359\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx4320
+\clvertalc \clcbpat6 \clwWidth3046\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6480
+\clvertalc \clcbpat6 \clwWidth4773\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Regional (\cf3 \cb4 \strokec3 \{R\}-speech.googleapis.com\cf2 \cb1 \strokec2 )\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Must match regional code (\cf3 \cb4 \strokec3 \{R\}\cf2 \cb1 \strokec2 ) e.g., \cf3 \cb4 \strokec3 us-central1\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Chirp, Chirp 2, Chirp 3, and regional instances of standard models\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Required for strict Data Residency guarantees and access to advanced, regionally deployed models.\cell \lastrow\row
+\pard\pardeftab720\sa320\partightenfactor0
+\cf2 \
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs36 \cf2 II. Deep Dive into Speech V2 Architectural Paradigms\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 2.1 V1 vs. V2: The Transition to Enforced Regionality\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The design evolution from STT V1 to V2 reflects a focus on enterprise requirements, primarily shifting control plane management and execution to the regional level.
+\fs32 \cf3 \cb5 \super \strokec3 2
+\fs24 \cf2 \cb1 \nosupersub \strokec2  V2 features, such as data residency, support for Customer-Managed Encryption Keys (CMEK), and enhanced logging, necessitate that all processing occurs within geo-fenced infrastructure.
+\fs32 \cf3 \cb5 \super \strokec3 1
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+This design choice establishes a split personality within the V2 API: a simplified global path for generic, non-compliance use cases, and a strictly enforced regional path for specialized or compliance-sensitive features. The allowance for standard V2 models (e.g., \cf3 \cb4 \strokec3 long\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 short\cf2 \cb1 \strokec2 ) to use the \cf3 \cb4 \strokec3 locations/global\cf2 \cb1 \strokec2  path via the default client endpoint is a convenience abstraction.
+\fs32 \cf3 \cb5 \super \strokec3 5
+\fs24 \cf2 \cb1 \nosupersub \strokec2  However, the moment a user requires strict data residency or uses an intrinsically regional model like Chirp, the regional path becomes the only viable option. The architecture demands that developers select their API path based on the most restrictive compliance or model requirement. For Chirp, which is only provisioned in specific regions, the regional path is non-negotiable, thereby forcing the explicit alignment of the endpoint and the resource path.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 2.2 The Role of the Recognizer Resource in V2\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The introduction of the Recognizer resource in V2 is central to its architectural identity, serving as a persistent, reusable configuration object, unlike the transient configurations used in V1.
+\fs32 \cf3 \cb5 \super \strokec3 9
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+The Recognizer resource name adheres to the format: \cf3 \cb4 \strokec3 projects/\{project\}/locations/\{location\}/recognizers/\{recognizer\}\cf2 \cb1 \strokec2 .
+\fs32 \cf3 \cb5 \super \strokec3 12
+\fs24 \cf2 \cb1 \nosupersub \strokec2  The location segment (\cf3 \cb4 \strokec3 \{location\}\cf2 \cb1 \strokec2 ) is critical because it dictates the specific Google Cloud region where the configuration is stored and, crucially, where the transcription operation will be executed.
+\fs32 \cf3 \cb5 \super \strokec3 12
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+Even when using the implicit Recognizer\'97where the \cf3 \cb4 \strokec3 \{recognizer\}\cf2 \cb1 \strokec2  segment is replaced with an underscore (\cf3 \cb4 \strokec3 recognizers/_\cf2 \cb1 \strokec2 ) and the configuration is passed in the request body\'97a valid location path (either \cf3 \cb4 \strokec3 locations/global\cf2 \cb1 \strokec2  or \cf3 \cb4 \strokec3 locations/us-central1\cf2 \cb1 \strokec2 , etc.) must still be provided.
+\fs32 \cf3 \cb5 \super \strokec3 5
+\fs24 \cf2 \cb1 \nosupersub \strokec2  This location path ensures that the underlying service knows which regional compute infrastructure should handle the request and adhere to the associated compliance boundaries.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 2.3 The Strict Endpoint-Path Enforcement Mechanism\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The underlying service infrastructure rigorously enforces alignment between the client's connection endpoint and the resource path location to prevent accidental data processing that crosses geopolitical boundaries, which would invalidate data residency guarantees.\
+The \cf3 \cb4 \strokec3 ClientOptions\cf2 \cb1 \strokec2  object used during \cf3 \cb4 \strokec3 SpeechClient\cf2 \cb1 \strokec2  initialization is the mechanism that selects the target service boundary.
+\fs32 \cf3 \cb5 \super \strokec3 2
+\fs24 \cf2 \cb1 \nosupersub \strokec2  By setting \cf3 \cb4 \strokec3 api_endpoint\cf2 \cb1 \strokec2  to a regional URL (e.g., \cf3 \cb4 \strokec3 us-central1-speech.googleapis.com\cf2 \cb1 \strokec2 ), the client explicitly routes the request through the designated regional ingress point.\
+When a regional endpoint is used, the system expects the resource name in the subsequent API calls (like \cf3 \cb4 \strokec3 batch_recognize\cf2 \cb1 \strokec2  or \cf3 \cb4 \strokec3 recognize\cf2 \cb1 \strokec2 ) to reference a resource within that same region. If the \cf3 \cb4 \strokec3 api_endpoint\cf2 \cb1 \strokec2  is global, the system expects the resource path to be global. If this coupling is violated\'97as was the case when the global endpoint received a request for a regional resource\'97the network layer rejects the request, validating that the request is coming through the expected geopolitical pathway. This strict validation is essential because regional infrastructure often handles authentication keys and service configuration unique to that region, ensuring localized service integrity.
+\fs32 \cf3 \cb5 \super \strokec3 14
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs36 \cf2 III. Comprehensive Analysis of Model Location Requirements\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The location requirement for a Speech-to-Text V2 operation is dictated by the highest constraint imposed by the model or the compliance needs. For Chirp models, this constraint is always regional.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 3.1 Model Family Location Mapping\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b \cf2 3.1.1 Location requirements for the Chirp family\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0 \cf2 \
+The Chirp family of models, including the latest Chirp 3, represents complex, resource-intensive ASR systems utilizing Universal large Speech Models (USM) and LLM technology.
+\fs32 \cf3 \cb5 \super \strokec3 5
+\fs24 \cf2 \cb1 \nosupersub \strokec2  Google manages the deployment and scale of these models by restricting their availability to specific, strategically provisioned regions.\
+The original Chirp model, and subsequent versions like Chirp 2, are confirmed available in regions such as \cf3 \cb4 \strokec3 us-central1\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 europe-west4\cf2 \cb1 \strokec2 , and \cf3 \cb4 \strokec3 asia-southeast1\cf2 \cb1 \strokec2 .
+\fs32 \cf3 \cb5 \super \strokec3 3
+\fs24 \cf2 \cb1 \nosupersub \strokec2  Accessing these models is a 
+\f1\b Mandatory Regional
+\f0\b0  requirement. Attempting to use the model string \cf3 \cb4 \strokec3 chirp\cf2 \cb1 \strokec2  or \cf3 \cb4 \strokec3 chirp_2\cf2 \cb1 \strokec2  within a \cf3 \cb4 \strokec3 locations/global\cf2 \cb1 \strokec2  Recognizer path will result in failure because the underlying model infrastructure is simply not provisioned in the abstract \cf3 \cb4 \strokec3 global\cf2 \cb1 \strokec2  location, even if the API allows the path format for other models.
+\fs32 \cf3 \cb5 \super \strokec3 11
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b \cf2 3.1.2 Location requirements for general V2 models (\cf3 \cb4 \strokec3 long\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 short\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 telephony\cf2 \cb1 \strokec2 )\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0 \cf2 \
+Standard V2 models, such as \cf3 \cb4 \strokec3 long\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 short\cf2 \cb1 \strokec2 , and \cf3 \cb4 \strokec3 telephony\cf2 \cb1 \strokec2 , are generally available across a broader range of regions.
+\fs32 \cf3 \cb5 \super \strokec3 15
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+These general models offer flexibility: they can be used via the \cf3 \cb4 \strokec3 locations/global\cf2 \cb1 \strokec2  path (using the default global client endpoint) or through a regional path (using a regional client endpoint).
+\fs32 \cf3 \cb5 \super \strokec3 5
+\fs24 \cf2 \cb1 \nosupersub \strokec2  However, for any application where data residency is a concern, architectural best practice dictates configuring these models regionally. This ensures that the entire service invocation, from request to logging, adheres to the V2 data residency commitment.
+\fs32 \cf3 \cb5 \super \strokec3 2
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+The decision to strictly confine high-performance models like Chirp to regional access points allows Google to control deployment costs and ensure that the specialized infrastructure required for USM and LLM backends is reliably available only where announced, thus guaranteeing service quality for advanced features.\
+Regional Availability of High-Performance V2 Models (Chirp Family)\
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth1334\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx1728
+\clvertalc \clcbpat6 \clwWidth2251\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx3456
+\clvertalc \clcbpat6 \clwWidth3330\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5184
+\clvertalc \clcbpat6 \clwWidth1949\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6912
+\clvertalc \clcbpat6 \clwWidth3675\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Model Identifier
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Key Function
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Supported Recognition Methods
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Location Requirement
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Initial GA Regions (Reference)
+\f0\b0 \cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth1334\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx1728
+\clvertalc \clcbpat6 \clwWidth2251\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx3456
+\clvertalc \clcbpat6 \clwWidth3330\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5184
+\clvertalc \clcbpat6 \clwWidth1949\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6912
+\clvertalc \clcbpat6 \clwWidth3675\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 chirp\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 General Multilingual ASR\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Recognize, BatchRecognize\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Regional (Mandatory)\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 us-central1, europe-west4, asia-southeast1 
+\fs32 \cf3 \cb5 \super \strokec3 4
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth1334\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx1728
+\clvertalc \clcbpat6 \clwWidth2251\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx3456
+\clvertalc \clcbpat6 \clwWidth3330\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5184
+\clvertalc \clcbpat6 \clwWidth1949\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6912
+\clvertalc \clcbpat6 \clwWidth3675\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 chirp_2\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Enhanced Multilingual ASR\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Streaming, Recognize, BatchRecognize\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Regional (Mandatory)\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 us-central1, europe-west4, asia-southeast1 
+\fs32 \cf3 \cb5 \super \strokec3 3
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrt\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth1334\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx1728
+\clvertalc \clcbpat6 \clwWidth2251\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx3456
+\clvertalc \clcbpat6 \clwWidth3330\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5184
+\clvertalc \clcbpat6 \clwWidth1949\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx6912
+\clvertalc \clcbpat6 \clwWidth3675\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 chirp_3\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Latest LLM-powered ASR\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Streaming, Recognize, BatchRecognize\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Regional (Mandatory)\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Query Config API for current support 
+\fs32 \cf3 \cb5 \super \strokec3 5
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \cell \lastrow\row
+\pard\pardeftab720\sa320\partightenfactor0
+\cf2 \
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 3.2 Differentiation in Recognition Methods\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The user's issue arose during \cf3 \cb4 \strokec3 batch_recognize\cf2 \cb1 \strokec2 . This recognition method handles long-form audio (one minute up to eight hours) and executes asynchronously via Long Running Operations (LROs).
+\fs32 \cf3 \cb5 \super \strokec3 4
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+There is no structural difference in location requirements between synchronous (standard) and asynchronous (batch) recognition for the same model string; the model identifier (e.g., \cf3 \cb4 \strokec3 chirp\cf2 \cb1 \strokec2 ) remains consistent.
+\fs32 \cf3 \cb5 \super \strokec3 3
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+However, the architecture of batch operations reinforces the need for strict regional enforcement. Batch processing involves storing input data (often via GCS URIs) and deferred computation results.
+\fs32 \cf3 \cb5 \super \strokec3 12
+\fs24 \cf2 \cb1 \nosupersub \strokec2  To guarantee data residency, the regional boundary must be enforced not just at the request initiation point but throughout the entire operation's lifecycle, including temporary storage and asynchronous execution. The global entry point cannot provide the necessary regional assurance for LRO integrity, which explains why the validation failure is particularly aggressive when a regional batch request is routed through the default global API endpoint.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs36 \cf2 IV. Dynamic Model and Feature Discovery using the Config API\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 4.1 Introduction to projects.locations.config.get (SDK: client.get_config)\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+Given that model availability, language support, and features evolve rapidly\'97as evidenced by the GA announcement for Chirp 2 in 2025 in specific regions 
+\fs32 \cf3 \cb5 \super \strokec3 6
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \'97relying solely on static documentation is insufficient. The definitive, runtime method for programmatically determining regional capabilities is the \cf3 \cb4 \strokec3 projects.locations.config.get\cf2 \cb1 \strokec2  API.
+\fs32 \cf3 \cb5 \super \strokec3 3
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+This API provides location metadata detailing the languages, models, and model features available within a specific region.
+\fs32 \cf3 \cb5 \super \strokec3 16
+\fs24 \cf2 \cb1 \nosupersub \strokec2  The REST endpoint for this resource follows the format: \cf3 \cb4 \strokec3 projects/\{project\}/locations/\{location\}/config\cf2 \cb1 \strokec2 .
+\fs32 \cf3 \cb5 \super \strokec3 17
+\fs24 \cf2 \cb1 \nosupersub \strokec2  In the Python SDK, this is exposed via the \cf3 \cb4 \strokec3 client.get_config()\cf2 \cb1 \strokec2  method.
+\fs32 \cf3 \cb5 \super \strokec3 13
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 4.2 Python Implementation for Programmatic Regional Query\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+Successful querying of regional capabilities requires adherence to the V2 architectural principle of regional client binding. The client used to query the configuration must be initialized to the regional endpoint matching the configuration resource name.\
+\pard\pardeftab720\partightenfactor0
+\cf3 \cb7 \strokec3 Python\cb1 \
+\pard\pardeftab720\qc\partightenfactor0
+
+\fs48 \cf3 \
+\
+\
+\pard\pardeftab720\partightenfactor0
+
+\fs28 \cf9 \cb7 \strokec9 from\cf3 \strokec3  google.cloud.speech_v2 \cf9 \strokec9 import\cf3 \strokec3  SpeechClient\
+\cf9 \strokec9 from\cf3 \strokec3  google.api_core.client_options \cf9 \strokec9 import\cf3 \strokec3  ClientOptions\
+\cf9 \strokec9 from\cf3 \strokec3  google.cloud.speech_v2.types \cf9 \strokec9 import\cf3 \strokec3  GetConfigRequest\
+\cf9 \strokec9 import\cf3 \strokec3  os\
+\
+PROJECT_ID = os.getenv(\cf10 \strokec10 "GOOGLE_CLOUD_PROJECT"\cf3 \strokec3 , \cf10 \strokec10 "your-project-id"\cf3 \strokec3 )\
+\
+\cf9 \strokec9 def\cf3 \strokec3  \cf11 \strokec11 get_regional_config\cf3 \strokec3 (project_id: \cf12 \strokec12 str\cf3 \strokec3 , location: \cf12 \strokec12 str\cf3 \strokec3 ):\
+    \cf10 \strokec10 """\
+    Retrieves the configuration object for a specific Speech-to-Text V2 region.\
+    Requires client initialization to the corresponding regional endpoint.\
+    """\cf3 \strokec3 \
+    \cf9 \strokec9 try\cf3 \strokec3 :\
+        \cf13 \strokec13 # 1. Initialize client with regional endpoint\cf3 \strokec3 \
+        \cf13 \strokec13 # This aligns the network path with the requested resource location.\cf3 \strokec3 \
+        client = SpeechClient(\
+            client_options=ClientOptions(\
+                api_endpoint=\cf10 \strokec10 f"\cf2 \strokec2 \{location\}\cf10 \strokec10 -speech.googleapis.com"\cf3 \strokec3 ,\
+            )\
+        )\
+    \cf9 \strokec9 except\cf3 \strokec3  Exception \cf9 \strokec9 as\cf3 \strokec3  e:\
+        print(\cf10 \strokec10 f"Failed to initialize client for \cf2 \strokec2 \{location\}\cf10 \strokec10 : \cf2 \strokec2 \{e\}\cf10 \strokec10 "\cf3 \strokec3 )\
+        \cf9 \strokec9 return\cf3 \strokec3  \cf14 \strokec14 None\cf3 \strokec3 \
+        \
+    \cf13 \strokec13 # 2. Define the config resource name\cf3 \strokec3 \
+    config_name = \cf10 \strokec10 f"projects/\cf2 \strokec2 \{project_id\}\cf10 \strokec10 /locations/\cf2 \strokec2 \{location\}\cf10 \strokec10 /config"\cf3 \strokec3 \
+    \
+    request = GetConfigRequest(name=config_name)\
+    \
+    \cf13 \strokec13 # 3. Call the API\cf3 \strokec3 \
+    \cf9 \strokec9 try\cf3 \strokec3 :\
+        config_response = client.get_config(request=request)\
+        print(\cf10 \strokec10 f"Successfully retrieved config for \cf2 \strokec2 \{location\}\cf10 \strokec10 ."\cf3 \strokec3 )\
+        \cf9 \strokec9 return\cf3 \strokec3  config_response\
+    \cf9 \strokec9 except\cf3 \strokec3  Exception \cf9 \strokec9 as\cf3 \strokec3  e:\
+        \cf13 \strokec13 # Catches errors like 404 (location invalid) or permission errors.\cf3 \strokec3 \
+        print(\cf10 \strokec10 f"Error retrieving config for \cf2 \strokec2 \{location\}\cf10 \strokec10 : \cf2 \strokec2 \{e\}\cf10 \strokec10 "\cf3 \strokec3 )\
+        \cf9 \strokec9 return\cf3 \strokec3  \cf14 \strokec14 None\cf3 \strokec3 \
+\
+\pard\pardeftab720\partightenfactor0
+\cf13 \strokec13 # Example Usage:\cf3 \strokec3 \
+\cf13 \strokec13 # us_central_config = get_regional_config(PROJECT_ID, "us-central1")\cf3 \strokec3 \
+\cf13 \strokec13 # print(us_central_config)\cf3 \strokec3 \
+\pard\pardeftab720\sa320\partightenfactor0
+
+\fs24 \cf2 \cb1 \strokec2 \
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 4.3 Deconstructing the Config Response Object\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The response body from \cf3 \cb4 \strokec3 client.get_config()\cf2 \cb1 \strokec2  contains an instance of the \cf3 \cb4 \strokec3 Config\cf2 \cb1 \strokec2  object (\cf3 \cb4 \strokec3 google.cloud.speech_v2.types.Config\cf2 \cb1 \strokec2 ).
+\fs32 \cf3 \cb5 \super \strokec3 17
+\fs24 \cf2 \cb1 \nosupersub \strokec2  While the detailed programmatic schema is typically found within the SDK documentation (e.g., Java documentation references a \cf3 \cb4 \strokec3 Config\cf2 \cb1 \strokec2  class 
+\fs32 \cf3 \cb5 \super \strokec3 19
+\fs24 \cf2 \cb1 \nosupersub \strokec2 ), the API\'92s stated purpose mandates that the object structure must contain specific metadata to fulfill its function of detailing regional capabilities.
+\fs32 \cf3 \cb5 \super \strokec3 16
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \
+The \cf3 \cb4 \strokec3 Config\cf2 \cb1 \strokec2  object establishes the formal contract of capabilities for that region. Since the \cf3 \cb4 \strokec3 RecognitionConfig\cf2 \cb1 \strokec2  object relies on fields like \cf3 \cb4 \strokec3 model\cf2 \cb1 \strokec2  and \cf3 \cb4 \strokec3 language_codes\cf2 \cb1 \strokec2  
+\fs32 \cf3 \cb5 \super \strokec3 20
+\fs24 \cf2 \cb1 \nosupersub \strokec2 , the \cf3 \cb4 \strokec3 Config\cf2 \cb1 \strokec2  response must provide structured data that validates the availability of these specific parameters within the regional scope. It is inferred that the object contains a key complex field that lists supported capabilities.\
+Inferred Config Response Schema Key Fields for Model Discovery\
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2308\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2880
+\clvertalc \clcbpat6 \clwWidth947\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5760
+\clvertalc \clcbpat6 \clwWidth10404\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Field Name
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Type
+\f0\b0 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Description & Relevance to Model Discovery
+\f0\b0 \cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2308\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2880
+\clvertalc \clcbpat6 \clwWidth947\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5760
+\clvertalc \clcbpat6 \clwWidth10404\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 name\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 string\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 The full resource name of the Config object (\cf3 \cb4 \strokec3 projects/\{P\}/locations/\{L\}/config\cf2 \cb1 \strokec2 ).\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2308\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2880
+\clvertalc \clcbpat6 \clwWidth947\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5760
+\clvertalc \clcbpat6 \clwWidth10404\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 kms_key_name\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 string\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 Optional: Information regarding Customer-Managed Encryption Keys (CMEK).\cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2308\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2880
+\clvertalc \clcbpat6 \clwWidth947\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5760
+\clvertalc \clcbpat6 \clwWidth10404\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 model_data\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 repeated list of objects\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+
+\f1\b \cf2 Critical:
+\f0\b0  Structured list detailing available models (e.g., \cf3 \cb4 \strokec3 chirp_2\cf2 \cb1 \strokec2 , \cf3 \cb4 \strokec3 telephony\cf2 \cb1 \strokec2 ), their supported language codes (BCP-47), and recognition features (e.g., diarization, adaptation) within the specified location.
+\fs32 \cf3 \cb5 \super \strokec3 15
+\fs24 \cf2 \cb1 \nosupersub \strokec2 \cell \row
+
+\itap1\trowd \taflags0 \trgaph108\trleft-108 \trcbpat7 \tamarb640 \trbrdrl\brdrnil \trbrdrt\brdrnil \trbrdrr\brdrnil 
+\clvertalc \clcbpat6 \clwWidth2308\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx2880
+\clvertalc \clcbpat6 \clwWidth947\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx5760
+\clvertalc \clcbpat6 \clwWidth10404\clftsWidth3 \clmart10 \clmarl10 \clmarb10 \clmarr10 \clbrdrt\brdrs\brdrw20\brdrcf2 \clbrdrl\brdrs\brdrw20\brdrcf2 \clbrdrb\brdrs\brdrw20\brdrcf2 \clbrdrr\brdrs\brdrw20\brdrcf2 \clpadt160 \clpadl240 \clpadb160 \clpadr240 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf3 \cb4 \strokec3 supported_features\cf2 \cb1 \strokec2 \cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 repeated string\cell 
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf2 General V2 features supported by the region (e.g., transcript normalization, adaptation).\cell \lastrow\row
+\pard\pardeftab720\sa320\partightenfactor0
+\cf2 Programmatic inspection of the \cf3 \cb4 \strokec3 model_data\cf2 \cb1 \strokec2  field within the \cf3 \cb4 \strokec3 Config\cf2 \cb1 \strokec2  object allows an application to dynamically determine, at runtime, if a given model (like \cf3 \cb4 \strokec3 chirp\cf2 \cb1 \strokec2 ) and its necessary features are provisioned in a particular region. This function prevents configuration errors and facilitates robust regional routing policies.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs36 \cf2 V. Implementation Guide: Deploying Regional Recognizers in Python\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+This section provides the necessary Python steps to correctly configure the client and resource path, thereby resolving the $400$ routing error for \cf3 \cb4 \strokec3 batch_recognize\cf2 \cb1 \strokec2  using the Chirp model.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 5.1 Correct SpeechClient Initialization for Regional Access\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The use of \cf3 \cb4 \strokec3 ClientOptions\cf2 \cb1 \strokec2  to override the default global endpoint is the essential first step for any regional V2 operation, especially when using Chirp.\
+\pard\pardeftab720\partightenfactor0
+\cf3 \cb7 \strokec3 Python\cb1 \
+\pard\pardeftab720\qc\partightenfactor0
+
+\fs48 \cf3 \
+\
+\
+\pard\pardeftab720\partightenfactor0
+
+\fs28 \cf9 \cb7 \strokec9 import\cf3 \strokec3  os\
+\cf9 \strokec9 from\cf3 \strokec3  google.api_core.client_options \cf9 \strokec9 import\cf3 \strokec3  ClientOptions\
+\cf9 \strokec9 from\cf3 \strokec3  google.cloud.speech_v2 \cf9 \strokec9 import\cf3 \strokec3  SpeechClient\
+\cf9 \strokec9 from\cf3 \strokec3  google.cloud.speech_v2.types \cf9 \strokec9 import\cf3 \strokec3  cloud_speech \
+\
+PROJECT_ID = os.getenv(\cf10 \strokec10 "GOOGLE_CLOUD_PROJECT"\cf3 \strokec3 , \cf10 \strokec10 "your-project-id"\cf3 \strokec3 )\
+REGION = \cf10 \strokec10 "us-central1"\cf3 \strokec3  \cf13 \strokec13 # Must be a region where Chirp is supported, e.g., us-central1 \cf3 \strokec3 \
+\
+\pard\pardeftab720\partightenfactor0
+\cf13 \strokec13 # 1. Instantiate the client pointing to the specific regional endpoint.\cf3 \strokec3 \
+\cf13 \strokec13 # This ensures that all subsequent requests are routed through the regional service boundary.\cf3 \strokec3 \
+\pard\pardeftab720\partightenfactor0
+\cf9 \strokec9 try\cf3 \strokec3 :\
+    client = SpeechClient(\
+        client_options=ClientOptions(\
+            api_endpoint=\cf10 \strokec10 f"\cf2 \strokec2 \{REGION\}\cf10 \strokec10 -speech.googleapis.com"\cf3 \strokec3 , \
+        )\
+    )\
+    print(\cf10 \strokec10 f"SpeechClient initialized for regional endpoint: \cf2 \strokec2 \{REGION\}\cf10 \strokec10 -speech.googleapis.com"\cf3 \strokec3 )\
+\cf9 \strokec9 except\cf3 \strokec3  Exception \cf9 \strokec9 as\cf3 \strokec3  e:\
+    print(\cf10 \strokec10 f"Client Initialization Error: \cf2 \strokec2 \{e\}\cf10 \strokec10 "\cf3 \strokec3 )\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\fs24 \cf2 \cb1 \strokec2 The region in the client endpoint 
+\f1\b must match
+\f0\b0  the location in the Recognizer path. If the endpoint is configured regionally (e.g., \cf3 \cb4 \strokec3 us-central1\cf2 \cb1 \strokec2 ), the request will be successfully routed, and the service will then expect a \cf3 \cb4 \strokec3 recognizer\cf2 \cb1 \strokec2  path containing \cf3 \cb4 \strokec3 locations/us-central1\cf2 \cb1 \strokec2 .\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 5.2 Creating an Explicit Regional Recognizer for Chirp\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+While implicit recognizers (\cf3 \cb4 \strokec3 recognizers/_\cf2 \cb1 \strokec2 ) can be used, defining an explicit, named Recognizer is recommended for production environments as it simplifies configuration reuse and tracking.
+\fs32 \cf3 \cb5 \super \strokec3 9
+\fs24 \cf2 \cb1 \nosupersub \strokec2  The parent path for creation must contain the target region.\
+\pard\pardeftab720\partightenfactor0
+\cf3 \cb7 \strokec3 Python\cb1 \
+\pard\pardeftab720\qc\partightenfactor0
+
+\fs48 \cf3 \
+\
+\
+\pard\pardeftab720\partightenfactor0
+
+\fs28 \cf9 \cb7 \strokec9 def\cf3 \strokec3  \cf11 \strokec11 create_regional_chirp_recognizer\cf3 \strokec3 (client: SpeechClient, project_id: \cf12 \strokec12 str\cf3 \strokec3 , region: \cf12 \strokec12 str\cf3 \strokec3 , recognizer_id: \cf12 \strokec12 str\cf3 \strokec3 ):\
+    \cf10 \strokec10 """Creates a Recognizer resource scoped to the specified region."""\cf3 \strokec3 \
+    \
+    parent_path = \cf10 \strokec10 f"projects/\cf2 \strokec2 \{project_id\}\cf10 \strokec10 /locations/\cf2 \strokec2 \{region\}\cf10 \strokec10 "\cf3 \strokec3 \
+    \
+    \cf13 \strokec13 # Define the configuration using the regional Chirp model\cf3 \strokec3 \
+    config = cloud_speech.RecognitionConfig(\
+        auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),\
+        language_codes=,\
+        model=\cf10 \strokec10 "chirp"\cf3 \strokec3 , \cf13 \strokec13 # Use the regionally supported model\cf3 \strokec3 \
+    )\
+    \
+    request = cloud_speech.CreateRecognizerRequest(\
+        parent=parent_path, \
+        recognizer_id=recognizer_id,\
+        recognizer=cloud_speech.Recognizer(\
+            display_name=\cf10 \strokec10 f"Chirp Recognizer in \cf2 \strokec2 \{region\}\cf10 \strokec10 "\cf3 \strokec3 ,\
+            default_recognition_config=config,\
+        ),\
+    )\
+    \
+    \cf13 \strokec13 # The client (initialized regionally in 5.1) sends the request to the regional service.\cf3 \strokec3 \
+    operation = client.create_recognizer(request=request)\
+    recognizer = operation.result()\
+    print(\cf10 \strokec10 f"Created Regional Recognizer: \cf2 \strokec2 \{recognizer.name\}\cf10 \strokec10 "\cf3 \strokec3 )\
+    \cf9 \strokec9 return\cf3 \strokec3  recognizer.name\
+\
+\pard\pardeftab720\partightenfactor0
+\cf13 \strokec13 # Example:\cf3 \strokec3 \
+\cf13 \strokec13 # regional_recognizer_name = create_regional_chirp_recognizer(client, PROJECT_ID, REGION, "my-chirp-batch-recognizer")\cf3 \strokec3 \
+\pard\pardeftab720\sa320\partightenfactor0
+
+\fs24 \cf2 \cb1 \strokec2 \
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 5.3 Executing BatchRecognize with Regional Resource References\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The final \cf3 \cb4 \strokec3 BatchRecognize\cf2 \cb1 \strokec2  request uses the fully qualified regional name of the Recognizer. Because the client was initialized with the matching regional endpoint (Section 5.1), the request is successfully routed and validated by the regional service boundary, resolving the initial $400$ error.\
+\pard\pardeftab720\partightenfactor0
+\cf3 \cb7 \strokec3 Python\cb1 \
+\pard\pardeftab720\qc\partightenfactor0
+
+\fs48 \cf3 \
+\
+\
+\pard\pardeftab720\partightenfactor0
+
+\fs28 \cf9 \cb7 \strokec9 def\cf3 \strokec3  \cf11 \strokec11 run_regional_batch_recognize\cf3 \strokec3 (client: SpeechClient, recognizer_name: \cf12 \strokec12 str\cf3 \strokec3 , gcs_uri: \cf12 \strokec12 str\cf3 \strokec3 ):\
+    \cf10 \strokec10 """Runs a batch recognition request using a specific regional recognizer."""\cf3 \strokec3 \
+    \
+    request = cloud_speech.BatchRecognizeRequest(\
+        recognizer=recognizer_name,\
+        files=,\
+    )\
+    \
+    print(\cf10 \strokec10 f"Starting Batch Recognize using regional recognizer: \cf2 \strokec2 \{recognizer_name\}\cf10 \strokec10 "\cf3 \strokec3 )\
+    \
+    \cf13 \strokec13 # The regionally-bound client executes the request.\cf3 \strokec3 \
+    operation = client.batch_recognize(request=request) \
+    \
+    print(\cf10 \strokec10 "Waiting for batch operation to complete..."\cf3 \strokec3 )\
+    result = operation.result()\
+    print(\cf10 \strokec10 "Batch operation completed."\cf3 \strokec3 )\
+    \cf9 \strokec9 return\cf3 \strokec3  result\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\fs24 \cf2 \cb1 \strokec2 \
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs36 \cf2 VI. Conclusion and Architectural Recommendations\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 6.1 Final V2 Location Rules Summary: The Global Exception\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+The core contradiction identified by the user\'97the error demanding a \cf3 \cb4 \strokec3 global\cf2 \cb1 \strokec2  location when using a regional model like Chirp\'97is definitively resolved as a networking and validation failure. The error message is not a rule for Chirp, but a signal that the global API gateway failed to route a regional resource request and defaulted to expecting the path it serves.\
+For Chirp and any other advanced or compliance-focused model in V2, the following rule holds: The resource location must be regional, and this regional location must be mirrored in the client\'92s \cf3 \cb4 \strokec3 api_endpoint\cf2 \cb1 \strokec2  configuration. The allowance for \cf3 \cb4 \strokec3 locations/global\cf2 \cb1 \strokec2  is a convenience path for standard V2 models when compliance is not a concern; it is functionally incompatible with Chirp\'92s underlying infrastructure.\
+\
+\pard\pardeftab720\sa160\partightenfactor0
+
+\f1\b\fs28 \cf2 6.2 Recommendations for Multi-Region, Multi-Model Deployments\
+\pard\pardeftab720\sa320\partightenfactor0
+
+\f0\b0\fs24 \cf2 \
+\pard\pardeftab720\sa160\partightenfactor0
+\cf2 For applications requiring flexibility across regions and models, adopting a dynamic approach is critical to future-proof the architecture against regional rollouts of advanced models like Chirp 3.\
+\pard\tx220\tx720\pardeftab720\li720\fi-720\sa160\partightenfactor0
+\ls1\ilvl0
+\f1\b \cf2 \kerning1\expnd0\expndtw0 \outl0\strokewidth0 {\listtext	1	}\expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 Mandatory Dynamic Routing with \cf3 \cb4 \strokec3 get_config()\cf2 \cb1 \strokec2 :
+\f0\b0  The application should leverage the \cf3 \cb4 \strokec3 client.get_config()\cf2 \cb1 \strokec2  API (Section IV) at startup or initialization to build a runtime map of available models, features, and languages per region. This data should serve as the authoritative decision layer for request routing. This step prevents potential failures (such as a $404$ Not Found error) that would occur if a developer manually configured a client to a region that does not yet support a requested model.\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 \outl0\strokewidth0 {\listtext	2	}\expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 Explicit Client Configuration:
+\f0\b0  Never rely on the default global client initialization when interacting with V2 features. All V2 interactions should be controlled by explicit environment configuration (e.g., defining \cf3 \cb4 \strokec3 SPEECH_V2_REGION\cf2 \cb1 \strokec2  environment variables) to ensure the client is always initialized with \cf3 \cb4 \strokec3 ClientOptions(api_endpoint=f"\{REGION\}-speech.googleapis.com")\cf2 \cb1 \strokec2 .\
+\ls1\ilvl0
+\f1\b \kerning1\expnd0\expndtw0 \outl0\strokewidth0 {\listtext	3	}\expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 Use Explicit Recognizers:
+\f0\b0  For long-running or batch operations, explicit, named Recognizers are preferred within the regional boundary. This provides better telemetry, simpler configuration management, and clearer resource scoping for data residency audits.\
+\pard\pardeftab720\sa320\partightenfactor0
+\cf2 Adherence to these regional architectural principles ensures stability and compliance, recognizing that the V2 API\'92s strict location constraints are an intentional design feature supporting enterprise-grade services. Programmatic discovery via the Config API is the operational requirement that future-proofs the application against the continuous evolution of Google's multilingual ASR capabilities.\
+}
