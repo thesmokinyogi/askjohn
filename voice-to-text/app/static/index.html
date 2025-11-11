@@ -641,7 +641,7 @@
 
                 const div = document.createElement('div');
                 div.className = 'model-option' + (index === 0 ? ' selected' : '');
-                div.onclick = () => selectModel(modelKey);
+                div.onclick = function() { selectModel(modelKey, this); };
 
                 const badges = [];
                 if (index === 0) badges.push('<div class="model-badge badge-default">Default</div>');
@@ -669,10 +669,10 @@
         }
 
         // Select model
-        function selectModel(modelKey) {
+        function selectModel(modelKey, clickedElement) {
             selectedModel = modelKey;
             document.querySelectorAll('.model-option').forEach(el => el.classList.remove('selected'));
-            event.currentTarget.classList.add('selected');
+            clickedElement.classList.add('selected');
 
             // Update model indicator
             updateModelIndicator();

@@ -10,10 +10,16 @@ Key differences from V1:
 - Async operation with polling
 - Better models (Chirp 3)
 - More features (speaker diarization, etc.)
+
+V2 Regional Architecture:
+- Chirp models REQUIRE regional endpoints (NOT global)
+- Client endpoint must match recognizer resource location
+- Different models support different regions
 """
 
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech
+from google.api_core.client_options import ClientOptions
 from typing import Dict, Optional
 import logging
 import time
@@ -60,20 +66,84 @@ class GoogleSpeechV2Service:
         'mov': MOV_AAC,
     }
 
+    # Model-specific region requirements
+    # Based on Google Cloud Speech V2 documentation (2025)
+    # Source: https://docs.cloud.google.com/speech-to-text/v2/docs/chirp_2-model
+    MODEL_REGION_CONFIG = {
+        'chirp': {
+            'requires_regional': True,
+            'supported_regions': ['us-central1', 'europe-west4', 'asia-southeast1'],
+            'default_region': 'us-central1',
+            'description': 'Chirp (Universal Speech Model) - requires specific regional endpoints'
+        },
+        'long': {
+            'requires_regional': False,  # Can use global, but regional recommended for data residency
+            'supported_regions': ['us-central1', 'us-west1', 'us-east1', 'europe-west1', 'asia-southeast1'],
+            'default_region': 'us-central1',
+            'description': 'Long-form transcription model - flexible regional support'
+        },
+        'short': {
+            'requires_regional': False,
+            'supported_regions': ['us-central1', 'us-west1', 'us-east1', 'europe-west1', 'asia-southeast1'],
+            'default_region': 'us-central1',
+            'description': 'Short-form transcription model - flexible regional support'
+        }
+    }
+
+    # Geographic region mapping for proximity-based fallback
+    # Used when requested region doesn't support the model
+    REGION_PROXIMITY_MAP = {
+        # US regions
+        'us-west1': ['us-central1', 'us-west2', 'us-east1'],
+        'us-west2': ['us-central1', 'us-west1', 'us-east1'],
+        'us-west3': ['us-central1', 'us-west1', 'us-east1'],
+        'us-west4': ['us-central1', 'us-west1', 'us-east1'],
+        'us-east1': ['us-central1', 'us-east4', 'us-west1'],
+        'us-east4': ['us-east1', 'us-central1', 'us-west1'],
+        'us-east5': ['us-east1', 'us-central1', 'us-west1'],
+        'us-central1': ['us-central1'],  # Already optimal
+        # Europe regions
+        'europe-west1': ['europe-west4', 'europe-west2', 'europe-west3'],
+        'europe-west2': ['europe-west1', 'europe-west4', 'europe-west3'],
+        'europe-west3': ['europe-west1', 'europe-west4', 'europe-west2'],
+        'europe-west4': ['europe-west4'],  # Already optimal for Chirp
+        # Asia regions
+        'asia-southeast1': ['asia-southeast1'],  # Already optimal for Chirp
+        'asia-northeast1': ['asia-southeast1', 'asia-south1'],
+        'asia-south1': ['asia-southeast1', 'asia-northeast1'],
+    }
+
     def __init__(self, project_id: str, model: str = "long", location: str = "us"):
         """
-        Initialize V2 Speech client.
+        Initialize V2 Speech client with model-aware regional configuration.
 
         Args:
             project_id: Google Cloud project ID
-            model: Model to use (chirp_3, long, short)
-            location: Google Cloud location (default: us)
-                     V2 models require regional location, not 'global'
+            model: Model to use (chirp, long, short)
+            location: Requested Google Cloud location
+                     Will be validated and mapped to supported region if needed
+
+        The client is initialized with a regional endpoint that matches the
+        final selected location, as required by V2 architecture for Chirp models.
         """
         self.project_id = project_id
         self.model = model
-        self.location = location
-        self.client = SpeechClient()
+
+        # Select and validate location based on model requirements
+        self.location = self._select_optimal_location(location, model)
+
+        # Initialize client with REGIONAL endpoint
+        # This is CRITICAL for Chirp models - they cannot use global endpoint
+        # The endpoint MUST match the location used in the recognizer path
+        api_endpoint = f"{self.location}-speech.googleapis.com"
+
+        logger.info(f"Initializing Speech V2 client: model={model}, location={self.location}, endpoint={api_endpoint}")
+
+        self.client = SpeechClient(
+            client_options=ClientOptions(
+                api_endpoint=api_endpoint
+            )
+        )
 
         # Yoga-specific vocabulary for better recognition
         self.yoga_vocabulary = [
@@ -98,7 +168,82 @@ class GoogleSpeechV2Service:
             "vinyasa", "hatha", "yin", "restorative"
         ]
 
-        logger.info(f"Initialized Speech V2 service: model={model}, location={location}, project={project_id}")
+        logger.info(f"Initialized Speech V2 service: model={model}, location={self.location}, project={project_id}")
+
+    def _select_optimal_location(self, requested_location: str, model: str) -> str:
+        """
+        Select the optimal location for the given model based on availability.
+
+        Strategy:
+        1. If requested location supports model → use it
+        2. Otherwise, map to nearest supported region
+        3. Fallback to model's default region
+
+        Args:
+            requested_location: Location requested by caller (e.g., from bucket region)
+            model: Model to use (chirp, long, short)
+
+        Returns:
+            Validated location that supports the model
+        """
+        # Get model configuration
+        model_config = self.MODEL_REGION_CONFIG.get(model, {})
+
+        if not model_config:
+            logger.warning(f"Unknown model '{model}', using default location 'us-central1'")
+            return 'us-central1'
+
+        supported_regions = model_config.get('supported_regions', [])
+        default_region = model_config.get('default_region', 'us-central1')
+
+        # If requested location is already supported, use it
+        if requested_location in supported_regions:
+            logger.info(f"✓ Using requested location '{requested_location}' for model '{model}'")
+            return requested_location
+
+        # Map to nearest supported region
+        nearest = self._map_to_nearest_region(requested_location, supported_regions)
+        if nearest:
+            logger.info(f"Mapped location '{requested_location}' → '{nearest}' for model '{model}'")
+            return nearest
+
+        # Fallback to model's default region
+        logger.warning(
+            f"Location '{requested_location}' not supported for model '{model}', "
+            f"using default '{default_region}'"
+        )
+        return default_region
+
+    def _map_to_nearest_region(self, requested: str, available: list) -> Optional[str]:
+        """
+        Map a requested region to the nearest available region.
+
+        Uses geographic proximity mapping to find the nearest supported region.
+
+        Args:
+            requested: Requested region (e.g., 'us-west1')
+            available: List of available regions for the model
+
+        Returns:
+            Nearest available region, or None if no mapping found
+        """
+        # Check if we have a proximity mapping for this region
+        nearby_regions = self.REGION_PROXIMITY_MAP.get(requested, [])
+
+        # Find first nearby region that's available
+        for region in nearby_regions:
+            if region in available:
+                return region
+
+        # No proximity mapping found, try to infer from region prefix
+        # e.g., "us-west1" → look for any "us-" region
+        if '-' in requested:
+            region_prefix = requested.split('-')[0]  # "us", "europe", "asia"
+            for region in available:
+                if region.startswith(region_prefix):
+                    return region
+
+        return None
 
     def submit_job(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None):
         """
