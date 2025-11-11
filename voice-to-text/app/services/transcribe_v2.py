@@ -566,8 +566,19 @@ class GoogleSpeechV2Service:
             if hasattr(response, 'results'):
                 results_map = response.results
 
-                # Log the type for debugging
+                # DEBUG: Detailed logging to understand structure
+                logger.info(f"====== PARSING DEBUG ======")
+                logger.info(f"Response type: {type(response)}")
                 logger.info(f"Results type: {type(results_map)}")
+                logger.info(f"Results has 'items': {hasattr(results_map, 'items')}")
+                logger.info(f"Results has '__iter__': {hasattr(results_map, '__iter__')}")
+                logger.info(f"Results is string: {isinstance(results_map, str)}")
+
+                # Try to log first few chars if it's string-like
+                try:
+                    logger.info(f"Results repr: {repr(results_map)[:500]}")
+                except:
+                    pass
 
                 # Handle different response structures
                 # V2 with inline_response_config returns a dict/map
