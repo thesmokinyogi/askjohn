@@ -317,11 +317,11 @@
 
         <!-- Filters -->
         <div class="filters">
-            <button class="filter-btn active" onclick="filterJobs('all')">All</button>
-            <button class="filter-btn" onclick="filterJobs('complete')">Complete</button>
-            <button class="filter-btn" onclick="filterJobs('processing')">Processing</button>
-            <button class="filter-btn" onclick="filterJobs('queued')">Queued</button>
-            <button class="filter-btn" onclick="filterJobs('failed')">Failed</button>
+            <button class="filter-btn active" onclick="filterJobs('all', this)">All</button>
+            <button class="filter-btn" onclick="filterJobs('complete', this)">Complete</button>
+            <button class="filter-btn" onclick="filterJobs('processing', this)">Processing</button>
+            <button class="filter-btn" onclick="filterJobs('queued', this)">Queued</button>
+            <button class="filter-btn" onclick="filterJobs('failed', this)">Failed</button>
             <button class="filter-btn" onclick="loadJobs()" style="margin-left: auto;">🔄 Refresh</button>
         </div>
 
@@ -396,14 +396,14 @@
         }
 
         // Filter jobs
-        function filterJobs(status) {
+        function filterJobs(status, clickedButton) {
             currentFilter = status;
 
             // Update active filter button
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            event.currentTarget.classList.add('active');
+            clickedButton.classList.add('active');
 
             // Re-render jobs
             renderJobs();
@@ -497,7 +497,7 @@
 
                     <div class="job-actions">
                         ${job.transcript ? `
-                        <button class="btn-small" onclick="toggleTranscript('${shortId}')">
+                        <button class="btn-small" onclick="toggleTranscript('${shortId}', this)">
                             📄 View Transcript
                         </button>
                         ` : ''}
@@ -512,16 +512,15 @@
         }
 
         // Toggle transcript visibility
-        function toggleTranscript(shortId) {
+        function toggleTranscript(shortId, clickedButton) {
             const transcriptEl = document.getElementById(`transcript-${shortId}`);
             transcriptEl.classList.toggle('active');
 
             // Update button text
-            const btn = event.currentTarget;
             if (transcriptEl.classList.contains('active')) {
-                btn.textContent = '▲ Hide Transcript';
+                clickedButton.textContent = '▲ Hide Transcript';
             } else {
-                btn.textContent = '📄 View Transcript';
+                clickedButton.textContent = '📄 View Transcript';
             }
         }
 
