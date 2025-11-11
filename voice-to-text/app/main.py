@@ -350,7 +350,7 @@ async def transcribe_audio(
         )
 
 
-@app.get("/api/jobs/{job_id}/status")
+@app.get("/api/jobs/{job_id:path}/status")
 async def check_job_status(job_id: str):
     """
     Check the status of a transcription job.
