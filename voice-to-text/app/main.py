@@ -5,10 +5,11 @@ FastAPI app for transcribing audio files using Google Speech-to-Text.
 Supports both V1 (synchronous, <60 sec) and V2 (batch, any length).
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from typing import Dict, Any
 import os
 import logging
 from datetime import datetime
@@ -703,7 +704,7 @@ async def detect_duration(file: UploadFile = File(...)):
 
 
 @app.post("/api/estimate-cost")
-async def estimate_cost(request: dict):
+async def estimate_cost(request: Dict[str, Any] = Body(...)):
     """
     Estimate cost for a transcription.
 
@@ -722,6 +723,8 @@ async def estimate_cost(request: dict):
         model = request.get("model", GOOGLE_MODEL)
         duration_minutes = request.get("duration_minutes", 0)
 
+        logger.info(f"Cost estimate request: provider={provider}, model={model}, duration={duration_minutes}")
+
         if duration_minutes <= 0:
             raise HTTPException(status_code=400, detail="duration_minutes must be > 0")
 
@@ -735,6 +738,8 @@ async def estimate_cost(request: dict):
             duration_minutes=duration_minutes,
             free_tier_remaining=free_tier_remaining
         )
+
+        logger.info(f"Cost estimate result: ${estimate['total_cost']:.2f} for {duration_minutes} minutes")
 
         return JSONResponse(content=estimate)
 
