@@ -82,17 +82,24 @@ if STT_PROVIDER == "google":
     if not GOOGLE_CLOUD_PROJECT:
         raise ValueError("GOOGLE_CLOUD_PROJECT must be set in .env when using Google provider")
 
-    # Initialize Google V2 services
+    # Initialize storage service first
     storage_service = CloudStorageService(
         bucket_name=GCS_BUCKET_NAME,
         project_id=GOOGLE_CLOUD_PROJECT
     )
+
+    # Detect optimal Speech V2 location based on bucket location
+    # This aligns API region with storage region for optimal latency
+    SPEECH_LOCATION = storage_service.detect_speech_location()
+
+    # Initialize transcription service with detected location
     transcription_service = get_transcription_service_v2(
         project_id=GOOGLE_CLOUD_PROJECT,
-        model=GOOGLE_MODEL
+        model=GOOGLE_MODEL,
+        location=SPEECH_LOCATION
     )
 
-    logger.info(f"Initialized Google provider: model={GOOGLE_MODEL}, bucket={GCS_BUCKET_NAME}")
+    logger.info(f"Initialized Google provider: model={GOOGLE_MODEL}, bucket={GCS_BUCKET_NAME}, location={SPEECH_LOCATION}")
 
 elif STT_PROVIDER == "whisper":
     # Whisper provider (not yet implemented)
@@ -152,6 +159,7 @@ async def health_check():
         health_info.update({
             "model": GOOGLE_MODEL,
             "bucket": GCS_BUCKET_NAME,
+            "location": SPEECH_LOCATION,
             "api": "v2_batch"
         })
 
@@ -279,10 +287,11 @@ async def transcribe_audio(
 
         # ===== STEP 4: Submit transcription job (NON-BLOCKING) =====
 
-        # Initialize transcription service with API model name
+        # Initialize transcription service with API model name and detected location
         model_transcription_service = get_transcription_service_v2(
             project_id=GOOGLE_CLOUD_PROJECT,
-            model=google_api_model
+            model=google_api_model,
+            location=SPEECH_LOCATION
         )
 
         # Submit job - this returns IMMEDIATELY (doesn't wait)

@@ -252,3 +252,90 @@ class CloudStorageService:
         except Exception as e:
             logger.error(f"Cannot access bucket {self.bucket_name}: {e}")
             return False
+
+    def detect_speech_location(self) -> str:
+        """
+        Detect the optimal Speech V2 API location based on bucket location.
+
+        This aligns the Speech API region with the bucket region for optimal
+        latency and data locality. Uses a smart fallback chain for robustness.
+
+        Mapping strategy:
+        - If bucket region supports Speech V2 → use it directly
+        - If not → map to nearest Speech V2-supported region
+        - Ultimate fallback → multi-region endpoint
+
+        Returns:
+            Speech V2 location string (e.g., 'us-central1', 'us', 'eu')
+        """
+        try:
+            # Get bucket location (cached by the client, minimal overhead)
+            self.bucket.reload()
+            bucket_location = self.bucket.location.lower()
+
+            logger.info(f"Bucket location: {bucket_location}")
+
+            # Speech V2 supported regions (as of 2025)
+            # Source: https://cloud.google.com/speech-to-text/v2/docs/locations
+            SPEECH_V2_REGIONS = {
+                # US regions
+                'us-central1', 'us-east1', 'us-west1',
+                # Europe regions
+                'europe-west1', 'europe-west2', 'europe-west3', 'europe-west4',
+                # Asia regions
+                'asia-south1', 'asia-southeast1', 'asia-northeast1',
+                # Other regions
+                'australia-southeast1', 'northamerica-northeast1',
+            }
+
+            # Direct match - bucket region supports Speech V2
+            if bucket_location in SPEECH_V2_REGIONS:
+                logger.info(f"✓ Bucket region {bucket_location} supports Speech V2, using it directly")
+                return bucket_location
+
+            # Nearest region mapping for common cases
+            REGION_MAPPING = {
+                # US regions → nearest Speech V2 region
+                'us-west2': 'us-west1',      # LA → Oregon
+                'us-west3': 'us-west1',      # Salt Lake → Oregon
+                'us-west4': 'us-west1',      # Las Vegas → Oregon
+                'us-east4': 'us-east1',      # Northern Virginia → South Carolina
+                'us-south1': 'us-central1',  # Dallas → Iowa
+
+                # Europe regions → nearest Speech V2 region
+                'europe-north1': 'europe-west1',      # Finland → Belgium
+                'europe-central2': 'europe-west3',    # Warsaw → Frankfurt
+                'europe-southwest1': 'europe-west2',  # Madrid → London
+
+                # Asia regions → nearest Speech V2 region
+                'asia-east1': 'asia-northeast1',      # Taiwan → Tokyo
+                'asia-east2': 'asia-southeast1',      # Hong Kong → Singapore
+                'asia-northeast2': 'asia-northeast1', # Osaka → Tokyo
+                'asia-northeast3': 'asia-northeast1', # Seoul → Tokyo
+            }
+
+            # Check mapping table
+            if bucket_location in REGION_MAPPING:
+                mapped_location = REGION_MAPPING[bucket_location]
+                logger.info(f"✓ Mapped bucket region {bucket_location} → Speech V2 region {mapped_location}")
+                return mapped_location
+
+            # Multi-region fallback based on location prefix
+            if bucket_location.startswith('us') or bucket_location == 'nam':
+                logger.info(f"⚠️  Using 'us' multi-region fallback for bucket location: {bucket_location}")
+                return 'us'
+            elif bucket_location.startswith('europe') or bucket_location == 'eu':
+                logger.info(f"⚠️  Using 'eu' multi-region fallback for bucket location: {bucket_location}")
+                return 'eu'
+            elif bucket_location.startswith('asia'):
+                logger.info(f"⚠️  Using 'asia-southeast1' fallback for bucket location: {bucket_location}")
+                return 'asia-southeast1'
+
+            # Ultimate fallback - US multi-region
+            logger.warning(f"⚠️  Unknown bucket location '{bucket_location}', defaulting to 'us' multi-region")
+            return 'us'
+
+        except Exception as e:
+            logger.error(f"Error detecting Speech location: {e}")
+            logger.warning("Defaulting to 'us' multi-region")
+            return 'us'
