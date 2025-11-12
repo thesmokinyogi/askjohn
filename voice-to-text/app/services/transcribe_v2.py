@@ -135,19 +135,22 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             logger.debug(f"No metadata for location {location_id}, skipping")
             continue
 
-        # The metadata field is a google.protobuf.Any containing LocationsMetadata
-        # We need to unpack it to a Struct first, then convert to dict
+        # The metadata field uses proto-plus, not raw protobuf
+        # Use native proto-plus .to_dict() instead of MessageToDict
         try:
-            # Try to unpack as a Struct (JSON-like structure)
-            metadata_struct = struct_pb2.Struct()
-            if loc.metadata.Unpack(metadata_struct):
-                # Convert Struct to dict
-                metadata_dict = MessageToDict(metadata_struct, preserving_proto_field_name=True)
-            else:
-                logger.warning(f"Could not unpack metadata for {location_id}, skipping")
+            # The location object from proto-plus has a to_dict() method
+            # This handles all nested proto-plus types automatically
+            location_dict = type(loc).to_dict(loc)
+            metadata_dict = location_dict.get('metadata', {})
+
+            if not metadata_dict:
+                logger.warning(f"No metadata found in {location_id}, skipping")
                 continue
+
+            logger.debug(f"✓ {location_id}: Extracted metadata with {len(metadata_dict)} top-level keys")
+
         except Exception as e:
-            logger.warning(f"Error parsing metadata for {location_id}: {e}, skipping")
+            logger.warning(f"Error extracting metadata for {location_id}: {e}, skipping")
             continue
 
         languages_map = metadata_dict.get('languages', {})
