@@ -119,12 +119,109 @@ Root cause fixes feel slower initially but:
 - Anxious feeling about whether it will hold together
 - Accumulating "except when" conditions
 
+---
+
+#### **The Research Dimension: Design Over Reaction**
+
+**Core Insight:**
+> "Band-aids feel like I'm serving the code. Research feels like the code is serving the design."
+>
+> "With band-aids, I ship and hope. With research, I ship and know."
+
+**Two Approaches to Problems:**
+
+**Reactive (Band-Aid):**
+```
+ERROR → Try Fix → Still Error? → Try Another Fix → Ship and Hope
+```
+- Fix the immediate symptom
+- Pattern-match error messages
+- Try-and-fail iteration
+- Debug in production
+- Feels like: Walking in the dark with hands out front
+
+**Proactive (Research-Driven):**
+```
+ERROR → Why? → Understand System → Design Solution → Ship and Know
+```
+- Understand the root cause
+- Study the system architecture
+- Design from understanding
+- Clear failure modes
+- Feels like: Building with blueprints
+
+**When Band-Aids Are Appropriate:**
+- System is unstable/experimental (API still changing)
+- Need production data to inform design
+- Prototyping or proof-of-concept
+- Failure is low-impact and easily recoverable
+- Time-critical hotfix (service down)
+
+**When Research Is Required:**
+- System is stable and documented (e.g., Google Cloud GA APIs)
+- Failures are user-facing or high-impact
+- Pattern will repeat across codebase
+- Building foundational architecture
+- You have time to understand (not on fire)
+
+**Case Study: Chirp Model Feature Support (2025-11-12)**
+
+**Situation:** Chirp model fails with `enable_word_confidence` error.
+
+**Band-aid option:**
+```python
+try:
+    config = RecognitionConfig(enable_word_confidence=True)
+    result = client.batch_recognize(config)
+except Exception as e:
+    if "word_level_confidence" in str(e):
+        config.enable_word_confidence = False
+        result = client.batch_recognize(config)
+```
+- Time: 5 minutes
+- Understanding gained: None
+- Future failures: Inevitable (Chirp 2, other features, other models)
+- Feels like: Reactive firefighting, always on defense
+
+**Research-driven option:**
+- Study Locations API documentation
+- Understand V2 model-specific feature support
+- Build dynamic feature detection system
+- Time: 4 hours (research + design + implementation)
+- Understanding gained: Complete mental model of V2 feature system
+- Future failures: Prevented architecturally
+- Feels like: Proactive design, playing offense
+
+**Result:** Research was correct choice. The band-aid would have created technical debt that multiplied with each new model (Chirp 2, Chirp 3, latest_long, etc.).
+
+**The Confidence Test:**
+- Band-aid: "I hope this works in production"
+- Research: "I know the failure modes and have addressed them"
+
+**The Sensation Test:**
+- Band-aid: Anxious. Will it hold? What did I miss?
+- Research: Confident. Built on solid understanding.
+
+**The Maintenance Test:**
+- Band-aid: "Why did we do this?" (6 months later)
+- Research: "This handles X because Y" (well-documented)
+
+**Key Insight:** Research approaches take longer upfront but save time over the system's lifetime. More importantly, they transform you from reactive firefighter to proactive architect.
+
+**Growth Principle:** "To feel strong, exercise where you're strong; but to GET strong, exercise where you're weak."
+- If rushing to code feels natural → Practice researching first
+- If over-analyzing feels natural → Practice shipping faster
+- Growth happens at the edge of discomfort
+
+---
+
 **Test:**
 - Does this solution work regardless of how files arrive (UI, API, batch, Content Cockpit)?
 - Would I be proud to show this code in 6 months?
 - Is this craftsmanship or outcome theater?
+- Did I understand the system before modifying it, or am I guessing?
 
-**Meta-lesson:** Pause and reflect instead of plowing forward. The pause is where wisdom lives. Discipline is faster than hacking over the lifetime of the system.
+**Meta-lesson:** Pause and reflect instead of plowing forward. The pause is where wisdom lives. Discipline is faster than hacking over the lifetime of the system. Research-driven development isn't slower—it's investing time in understanding that pays dividends across the entire lifecycle.
 
 ---
 
@@ -519,6 +616,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 | 1.4 | 2025-11-10 | Added "Root Cause Over Band-Aids" principle - fix underlying problems, resist outcome theater, value craftsmanship |
 | 1.5 | 2025-11-10 | Added "Verify Before Trust" principle - empirically validate resources work and are current before depending on them |
 | 1.6 | 2025-11-11 | Expanded "Before Implementing New APIs/Libraries" - study working code samples FIRST, usage patterns matter as much as data structures |
+| 1.7 | 2025-11-12 | Added "The Research Dimension: Design Over Reaction" to Root Cause principle - when to research vs ship, confidence through understanding, case study (Chirp feature support) |
 
 ---
 
