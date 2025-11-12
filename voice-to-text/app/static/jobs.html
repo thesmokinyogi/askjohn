@@ -644,7 +644,7 @@
             }
         }
 
-        // Auto-refresh every 10 seconds
+        // Auto-refresh every 60 seconds
         function startAutoRefresh() {
             autoRefreshInterval = setInterval(() => {
                 // Only refresh if there are processing/queued jobs
@@ -655,7 +655,7 @@
                 if (hasActiveJobs) {
                     loadJobs();
                 }
-            }, 10000); // 10 seconds
+            }, 60000); // 60 seconds
         }
 
         // Show error
