@@ -119,8 +119,11 @@ def initialize_feature_cache(project_id: str, location: str, models: list[str], 
                 # All retries exhausted
                 logger.error(
                     f"⚠️  DEGRADED: Locations API unavailable after {len(retry_delays)} retries. "
-                    f"Using minimal static fallback. Feature detection may be incorrect. "
-                    f"Error: {e}"
+                    f"Using minimal static fallback. Error: {e}"
+                )
+                logger.error(
+                    "⚠️  Impact: Dynamic feature detection disabled. Only known unsupported features will be filtered. "
+                    "Some model/feature combinations may fail at runtime."
                 )
                 _CACHE_LOADED = False
                 return False
@@ -189,17 +192,32 @@ def _query_locations_api(project_id: str, location: str, model: str, language: s
 
             # Extract features
             model_features = model_metadata.get('modelFeatures', {})
-            feature_list = model_features.get('modelFeature', [])
+            if not model_features:
+                logger.warning(f"No modelFeatures found for {model}/{language} in {location}")
+                return set()
 
-            # Extract feature names (ignore releaseState for now)
+            feature_list = model_features.get('modelFeature', [])
+            if not feature_list:
+                logger.warning(f"Empty modelFeature list for {model}/{language} in {location}")
+                return set()
+
+            # Extract feature names from dict objects (MessageToDict converts all to dicts)
+            # Each feature_obj is a dict with 'feature' and 'releaseState' keys
             supported_features = set()
             for feature_obj in feature_list:
-                if hasattr(feature_obj, 'feature'):
-                    supported_features.add(feature_obj.feature)
-                elif isinstance(feature_obj, dict):
-                    supported_features.add(feature_obj.get('feature'))
+                if not isinstance(feature_obj, dict):
+                    logger.warning(f"Unexpected feature_obj type for {model}/{language}: {type(feature_obj)}")
+                    continue
 
-            logger.debug(f"Discovered features for {model}/{language}: {supported_features}")
+                feature_name = feature_obj.get('feature')
+                if not feature_name:
+                    logger.warning(f"Missing 'feature' key in feature_obj for {model}/{language}: {feature_obj}")
+                    continue
+
+                supported_features.add(feature_name)
+                logger.debug(f"  • {feature_name} ({feature_obj.get('releaseState', 'unknown')})")
+
+            logger.info(f"Discovered {len(supported_features)} features for {model}/{language}: {sorted(supported_features)}")
             return supported_features
 
     raise ValueError(f"Location {location} not found in project {project_id}")
