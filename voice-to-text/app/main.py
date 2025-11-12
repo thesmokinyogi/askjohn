@@ -22,6 +22,7 @@ from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
 from app.services.jobs import get_job_storage
 from app.services.audio_metadata import get_audio_metadata_service
+from app.services.library import LibraryService
 
 # Load environment variables from .env file
 load_dotenv()
@@ -69,10 +70,11 @@ GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "long")  # Renamed from STT_MODEL
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 
-# Initialize pricing, budget, and job storage services
+# Initialize pricing, budget, job storage, and library services
 pricing_service = get_pricing_service()
 budget_service = get_budget_service(monthly_budget=MONTHLY_BUDGET)
 job_storage = get_job_storage()
+library_service = LibraryService()
 
 # Initialize services based on provider
 if STT_PROVIDER == "google":
@@ -143,6 +145,15 @@ async def jobs_page():
     if html_file.exists():
         return html_file.read_text()
     return "<h1>Jobs Page Not Found</h1><p><a href='/'>Back to Home</a></p>"
+
+
+@app.get("/library", response_class=HTMLResponse)
+async def library_page():
+    """Serve the library page."""
+    html_file = static_path / "library.html"
+    if html_file.exists():
+        return html_file.read_text()
+    return "<h1>Library Page Not Found</h1><p><a href='/'>Back to Home</a></p>"
 
 
 @app.get("/health")
@@ -402,6 +413,8 @@ async def check_job_status(job_id: str):
                 return JSONResponse(content={
                     "job_id": job_id,
                     "status": job_with_transcript["status"],
+                    "in_library": job_with_transcript.get("in_library", False),
+                    "library_id": job_with_transcript.get("library_id"),
                     "filename": job_with_transcript["filename"],
                     "model": job_with_transcript["model"],
                     "submitted_at": job_with_transcript["submitted_at"],
@@ -467,10 +480,43 @@ async def check_job_status(job_id: str):
                     cost=actual_cost
                 )
 
+                # Add to library - permanent storage for completed transcripts
+                # Get updated job record to access transcript_file
+                updated_job = job_storage.get_job(job_id)
+                transcript_file = updated_job.get("transcript_file")
+
+                # Calculate transcript file size
+                file_size_bytes = 0
+                if transcript_file:
+                    transcript_path = job_storage.TRANSCRIPTS_DIR / transcript_file
+                    if transcript_path.exists():
+                        file_size_bytes = transcript_path.stat().st_size
+
+                # Add entry to library
+                library_id = library_service.add_entry(
+                    filename=job_record["filename"],
+                    transcript_file=transcript_file,
+                    duration_minutes=job_record["duration_minutes"],
+                    model=job_record["model"],
+                    cost=actual_cost,
+                    file_size_bytes=file_size_bytes,
+                    metadata=status_result.get("metadata")
+                )
+
+                # Update job record to indicate it's in library
+                if library_id:
+                    job_storage.update_job(job_id, {
+                        "in_library": True,
+                        "library_id": library_id
+                    })
+                    logger.info(f"Added job {job_id} to library as {library_id}")
+
                 # Return complete result
                 return JSONResponse(content={
                     "job_id": job_id,
                     "status": "complete",
+                    "in_library": True,
+                    "library_id": library_id,
                     "filename": job_record["filename"],
                     "model": job_record["model"],
                     "submitted_at": job_record["submitted_at"],
@@ -790,6 +836,240 @@ async def estimate_cost(request: Dict[str, Any] = Body(...)):
     except Exception as e:
         logger.error(f"Error estimating cost: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# LIBRARY ENDPOINTS
+# ============================================================================
+
+@app.get("/api/library")
+async def list_library():
+    """
+    Get all library entries (sorted by date, newest first).
+
+    Returns:
+        List of library entries with metadata
+    """
+    try:
+        entries = library_service.get_all_entries()
+
+        return JSONResponse(content={
+            "entries": entries,
+            "total": len(entries)
+        })
+
+    except Exception as e:
+        logger.error(f"Error listing library: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing library: {str(e)}"
+        )
+
+
+@app.get("/api/library/{library_id}")
+async def get_library_entry(library_id: str):
+    """
+    Get a specific library entry with full transcript.
+
+    Args:
+        library_id: Library entry ID
+
+    Returns:
+        Library entry with transcript loaded
+    """
+    try:
+        entry = library_service.get_entry(library_id)
+
+        if not entry:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Library entry not found: {library_id}"
+            )
+
+        # Load transcript from file
+        transcript_file = entry.get("transcript_file")
+        if transcript_file:
+            transcript_path = library_service.TRANSCRIPTS_DIR / transcript_file
+            if transcript_path.exists():
+                with open(transcript_path, 'r') as f:
+                    transcript_data = json.load(f)
+                entry["transcript"] = transcript_data.get("transcript")
+                entry["words"] = transcript_data.get("words")
+
+        return JSONResponse(content=entry)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting library entry {library_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting library entry: {str(e)}"
+        )
+
+
+@app.get("/api/library/{library_id}/download/text")
+async def download_library_text(library_id: str):
+    """
+    Download library entry transcript as plain text.
+
+    Args:
+        library_id: Library entry ID
+
+    Returns:
+        Plain text file download
+    """
+    try:
+        entry = library_service.get_entry(library_id)
+
+        if not entry:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Library entry not found: {library_id}"
+            )
+
+        # Load transcript from file
+        transcript_file = entry.get("transcript_file")
+        if not transcript_file:
+            raise HTTPException(
+                status_code=404,
+                detail="No transcript available for this entry"
+            )
+
+        transcript_path = library_service.TRANSCRIPTS_DIR / transcript_file
+        if not transcript_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Transcript file not found"
+            )
+
+        with open(transcript_path, 'r') as f:
+            transcript_data = json.load(f)
+
+        transcript_text = transcript_data.get("transcript", "")
+
+        # Return as downloadable text file
+        from fastapi.responses import Response
+        filename = entry.get("filename", "transcript")
+        # Remove extension and add .txt
+        filename_base = filename.rsplit('.', 1)[0]
+
+        return Response(
+            content=transcript_text,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename_base}.txt"'
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading library text {library_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading text: {str(e)}"
+        )
+
+
+@app.get("/api/library/{library_id}/download/json")
+async def download_library_json(library_id: str):
+    """
+    Download library entry transcript as JSON.
+
+    Args:
+        library_id: Library entry ID
+
+    Returns:
+        JSON file download with full transcript data
+    """
+    try:
+        entry = library_service.get_entry(library_id)
+
+        if not entry:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Library entry not found: {library_id}"
+            )
+
+        # Load transcript from file
+        transcript_file = entry.get("transcript_file")
+        if not transcript_file:
+            raise HTTPException(
+                status_code=404,
+                detail="No transcript available for this entry"
+            )
+
+        transcript_path = library_service.TRANSCRIPTS_DIR / transcript_file
+        if not transcript_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Transcript file not found"
+            )
+
+        with open(transcript_path, 'r') as f:
+            transcript_data = json.load(f)
+
+        # Return as downloadable JSON file
+        from fastapi.responses import Response
+        filename = entry.get("filename", "transcript")
+        # Remove extension and add .json
+        filename_base = filename.rsplit('.', 1)[0]
+
+        return Response(
+            content=json.dumps(transcript_data, indent=2),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename_base}.json"'
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading library JSON {library_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error downloading JSON: {str(e)}"
+        )
+
+
+@app.delete("/api/library/{library_id}")
+async def delete_library_entry(library_id: str):
+    """
+    Permanently delete a library entry and its transcript file.
+
+    This is the ONLY place where transcripts are permanently deleted.
+
+    Args:
+        library_id: Library entry ID
+
+    Returns:
+        {"success": true, "library_id": "..."}
+    """
+    try:
+        success = library_service.delete_entry(library_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Library entry not found: {library_id}"
+            )
+
+        return JSONResponse(content={
+            "success": True,
+            "library_id": library_id,
+            "message": "Library entry deleted permanently"
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting library entry {library_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting library entry: {str(e)}"
+        )
 
 
 if __name__ == "__main__":

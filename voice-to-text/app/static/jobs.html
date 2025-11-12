@@ -292,7 +292,10 @@
     <div class="container">
         <div class="header">
             <h1>📋 Transcription Jobs</h1>
-            <a href="/" class="btn-link">← Back to Upload</a>
+            <div style="display: flex; gap: 10px;">
+                <a href="/" class="btn-link">← Back to Upload</a>
+                <a href="/library" class="btn-link">📚 Library</a>
+            </div>
         </div>
 
         <!-- Stats -->
@@ -459,7 +462,7 @@
                             </div>
                         </div>
                         <div class="status-badge ${statusClass}">
-                            ${job.status}
+                            ${job.status}${job.in_library ? ' • 📚 In Library' : ''}
                         </div>
                     </div>
 
@@ -505,14 +508,24 @@
                             📄 View Transcript
                         </button>
                         ` : ''}
+                        ${job.in_library && job.library_id ? `
+                        <a href="/library" class="btn-small" style="text-decoration: none; display: inline-block;">
+                            📚 View in Library
+                        </a>
+                        ` : ''}
                         ${job.status === 'processing' || job.status === 'queued' ? `
                         <button class="btn-small" id="check-btn-${shortId}" onclick="checkStatus('${job.job_id}', '${shortId}')">
                             🔄 Check Status
                         </button>
                         ` : ''}
-                        ${job.status === 'complete' || job.status === 'failed' ? `
-                        <button class="btn-small" onclick="deleteJob('${job.job_id}')" style="background: #dc3545; color: white;">
-                            🗑️ Delete
+                        ${job.status === 'complete' && job.in_library ? `
+                        <button class="btn-small" onclick="removeFromJobs('${job.job_id}')" style="background: #f59e0b; color: white;">
+                            ✕ Remove from Jobs
+                        </button>
+                        ` : ''}
+                        ${job.status === 'failed' ? `
+                        <button class="btn-small" onclick="dismissJob('${job.job_id}')" style="background: #6b7280; color: white;">
+                            ✕ Dismiss
                         </button>
                         ` : ''}
                     </div>
@@ -594,7 +607,59 @@
             }
         }
 
-        // Delete a single job
+        // Remove from jobs (but keep in library)
+        async function removeFromJobs(jobId) {
+            const shortId = jobId.split('/').pop();
+            if (!confirm(`Remove job ${shortId} from jobs list? (Transcript will remain in Library)`)) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Remove failed');
+                }
+
+                // Show success toast
+                showToast('Removed from Jobs - Available in Library');
+
+                // Reload jobs list
+                await loadJobs();
+
+            } catch (err) {
+                alert(`Error removing job: ${err.message}`);
+            }
+        }
+
+        // Dismiss a failed job
+        async function dismissJob(jobId) {
+            const shortId = jobId.split('/').pop();
+            if (!confirm(`Dismiss failed job ${shortId}?`)) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Dismiss failed');
+                }
+
+                // Show success toast
+                showToast('Failed job dismissed');
+
+                // Reload jobs list
+                await loadJobs();
+
+            } catch (err) {
+                alert(`Error dismissing job: ${err.message}`);
+            }
+        }
+
+        // Delete a single job (legacy - kept for compatibility)
         async function deleteJob(jobId) {
             const shortId = jobId.split('/').pop();
             if (!confirm(`Delete job ${shortId}?`)) return;
@@ -615,6 +680,47 @@
             } catch (err) {
                 alert(`Error deleting job: ${err.message}`);
             }
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            // Create toast if it doesn't exist
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.style.cssText = `
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: #333;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    z-index: 1000;
+                    display: none;
+                    animation: slideIn 0.3s ease;
+                `;
+                document.body.appendChild(toast);
+
+                // Add animation
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes slideIn {
+                        from { transform: translateX(400px); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            toast.textContent = message;
+            toast.style.display = 'block';
+
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
         }
 
         // Clear all completed jobs

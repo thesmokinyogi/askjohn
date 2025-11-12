@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript Library</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 28px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-link {
+            font-size: 14px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-link:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        /* Stats Banner */
+        .stats-banner {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        /* Library Table */
+        .library-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .library-table thead {
+            background: #f9fafb;
+        }
+
+        .library-table th {
+            padding: 12px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #666;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+
+        .library-table th:hover {
+            background: #f3f4f6;
+        }
+
+        .library-table th.sortable::after {
+            content: ' ⇅';
+            opacity: 0.3;
+        }
+
+        .library-table th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+
+        .library-table th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+
+        .library-table td {
+            padding: 15px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 14px;
+        }
+
+        .library-table tr:hover {
+            background: #f9fafb;
+        }
+
+        .filename-cell {
+            font-weight: 600;
+            color: #333;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .date-cell {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .duration-cell {
+            color: #666;
+            text-align: center;
+        }
+
+        .size-cell {
+            color: #666;
+            text-align: center;
+        }
+
+        .actions-cell {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            color: #667eea;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-small:hover {
+            background: #f8f9ff;
+            border-color: #667eea;
+        }
+
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .btn-delete:hover {
+            background: #c82333;
+            border-color: #bd2130;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .empty-state h2 {
+            font-size: 24px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .empty-state p {
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        /* Loading State */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: none;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.show {
+            display: block;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📚 Transcript Library</h1>
+            <div class="nav-links">
+                <a href="/" class="btn-link">🏠 Home</a>
+                <a href="/static/jobs.html" class="btn-link">📋 Jobs</a>
+            </div>
+        </div>
+
+        <!-- Stats Banner -->
+        <div class="stats-banner">
+            <div class="stat-item">
+                <div class="stat-label">TOTAL TRANSCRIPTS</div>
+                <div class="stat-value" id="stat-total">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">TOTAL DURATION</div>
+                <div class="stat-value" id="stat-duration">0 min</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">TOTAL SIZE</div>
+                <div class="stat-value" id="stat-size">0 KB</div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Loading library...</p>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="empty-state" style="display: none;">
+            <div class="empty-state-icon">📚</div>
+            <h2>No Transcripts Yet</h2>
+            <p>Completed transcriptions will automatically appear here.<br>Your transcript library is empty. Start by uploading an audio file!</p>
+            <br>
+            <a href="/" class="btn-link">Upload Audio File</a>
+        </div>
+
+        <!-- Library Table -->
+        <div id="library-container" style="display: none;">
+            <table class="library-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="filename">Filename</th>
+                        <th class="sortable" data-sort="added_at">Date Added</th>
+                        <th class="sortable" data-sort="duration_minutes">Duration</th>
+                        <th class="sortable" data-sort="file_size_bytes">File Size</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="library-tbody">
+                    <!-- Entries will be inserted here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let libraryEntries = [];
+        let currentSort = { field: 'added_at', direction: 'desc' };
+
+        // Initialize on page load
+        async function init() {
+            await loadLibrary();
+        }
+
+        // Load library entries
+        async function loadLibrary() {
+            try {
+                const response = await fetch('/api/library');
+                const data = await response.json();
+
+                libraryEntries = data.entries || [];
+
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+
+                if (libraryEntries.length === 0) {
+                    // Show empty state
+                    document.getElementById('empty-state').style.display = 'block';
+                    document.getElementById('library-container').style.display = 'none';
+                } else {
+                    // Show library table
+                    document.getElementById('empty-state').style.display = 'none';
+                    document.getElementById('library-container').style.display = 'block';
+
+                    // Sort by current sort settings
+                    sortLibrary(currentSort.field, false);
+
+                    // Render entries
+                    renderLibrary();
+
+                    // Update stats
+                    updateStats();
+                }
+
+            } catch (err) {
+                console.error('Error loading library:', err);
+                document.getElementById('loading').style.display = 'none';
+                showToast('Error loading library: ' + err.message);
+            }
+        }
+
+        // Render library table
+        function renderLibrary() {
+            const tbody = document.getElementById('library-tbody');
+            tbody.innerHTML = '';
+
+            libraryEntries.forEach(entry => {
+                const row = document.createElement('tr');
+
+                // Format date
+                const date = new Date(entry.added_at);
+                const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+
+                // Format duration
+                const duration = `${entry.duration_minutes.toFixed(1)} min`;
+
+                // Format file size
+                const size = formatFileSize(entry.file_size_bytes);
+
+                row.innerHTML = `
+                    <td class="filename-cell" title="${entry.filename}">${entry.filename}</td>
+                    <td class="date-cell">${dateStr}</td>
+                    <td class="duration-cell">${duration}</td>
+                    <td class="size-cell">${size}</td>
+                    <td>
+                        <div class="actions-cell">
+                            <a href="/api/library/${encodeURIComponent(entry.library_id)}/download/text"
+                               class="btn-small"
+                               title="Download as plain text">
+                                📄 Text
+                            </a>
+                            <a href="/api/library/${encodeURIComponent(entry.library_id)}/download/json"
+                               class="btn-small"
+                               title="Download as JSON">
+                                📊 JSON
+                            </a>
+                            <button class="btn-small btn-delete"
+                                    onclick="deleteEntry('${entry.library_id}')"
+                                    title="Permanently delete">
+                                🗑️ Delete
+                            </button>
+                        </div>
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Update stats
+        function updateStats() {
+            const total = libraryEntries.length;
+            const totalDuration = libraryEntries.reduce((sum, e) => sum + e.duration_minutes, 0);
+            const totalSize = libraryEntries.reduce((sum, e) => sum + e.file_size_bytes, 0);
+
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-duration').textContent = totalDuration.toFixed(1) + ' min';
+            document.getElementById('stat-size').textContent = formatFileSize(totalSize);
+        }
+
+        // Sort library
+        function sortLibrary(field, toggleDirection = true) {
+            // Toggle direction if clicking same field
+            if (toggleDirection && currentSort.field === field) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else if (toggleDirection) {
+                currentSort.field = field;
+                currentSort.direction = field === 'added_at' ? 'desc' : 'asc';
+            }
+
+            libraryEntries.sort((a, b) => {
+                let aVal = a[field];
+                let bVal = b[field];
+
+                // Handle string comparison (case-insensitive)
+                if (typeof aVal === 'string') {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+
+                if (aVal < bVal) return currentSort.direction === 'asc' ? -1 : 1;
+                if (aVal > bVal) return currentSort.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            // Update table headers
+            document.querySelectorAll('.library-table th').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+                if (th.dataset.sort === currentSort.field) {
+                    th.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+                }
+            });
+
+            renderLibrary();
+        }
+
+        // Delete entry
+        async function deleteEntry(libraryId) {
+            if (!confirm('Permanently delete this transcript? This cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/library/${encodeURIComponent(libraryId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Delete failed');
+                }
+
+                showToast('Transcript deleted permanently');
+
+                // Reload library
+                await loadLibrary();
+
+            } catch (err) {
+                console.error('Error deleting entry:', err);
+                showToast('Error: ' + err.message);
+            }
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Add click handlers for sortable headers
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('.library-table th.sortable').forEach(th => {
+                th.addEventListener('click', () => {
+                    const field = th.dataset.sort;
+                    sortLibrary(field);
+                });
+            });
+        });
+
+        // Initialize
+        init();
+    </script>
+</body>
+</html>
