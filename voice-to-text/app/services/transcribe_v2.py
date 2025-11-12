@@ -383,14 +383,20 @@ class GoogleSpeechV2Service:
 
             # CRITICAL: Unpack the response from protobuf Any wrapper
             # Google Cloud Long-Running Operations return responses wrapped in
-            # google.protobuf.any_pb2.Any as a generic container. We must call
-            # .Unpack() to deserialize into the actual BatchRecognizeResponse type.
-            # Without this, the response has no 'results' attribute and parsing fails.
+            # google.protobuf.any_pb2.Any as a generic container. We must deserialize
+            # this into the actual BatchRecognizeResponse type.
             # See: https://googleapis.dev/python/google-api-core/latest/operation.html
-            batch_response = cloud_speech.BatchRecognizeResponse()
-            operation.response.Unpack(batch_response)
 
-            logger.info(f"Unpacked response type: {type(batch_response)}")
+            # Log what type is in the Any wrapper
+            logger.info(f"Any type_url: {operation.response.type_url}")
+
+            # Deserialize using ParseFromString instead of Unpack
+            # This is more reliable for Google Cloud LRO responses
+            batch_response = cloud_speech.BatchRecognizeResponse()
+            batch_response.ParseFromString(operation.response.value)
+
+            logger.info(f"Deserialized response type: {type(batch_response)}")
+            logger.info(f"Response has results: {hasattr(batch_response, 'results')}")
 
             results = self._parse_results(batch_response)
 
