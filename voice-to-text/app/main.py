@@ -457,8 +457,9 @@ async def check_job_status(job_id: str):
                 budget_service = get_budget_service()
                 budget_service.record_transcription(
                     provider=STT_PROVIDER,
-                    cost=actual_cost,
-                    duration_minutes=job_record["duration_minutes"]
+                    model=job_record["model"],
+                    duration_minutes=job_record["duration_minutes"],
+                    cost=actual_cost
                 )
 
                 # Return complete result

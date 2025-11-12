@@ -381,7 +381,13 @@ class GoogleSpeechV2Service:
                     "metadata": None
                 }
 
-            results = self._parse_results(operation.response)
+            # Unpack the response from protobuf Any wrapper
+            batch_response = cloud_speech.BatchRecognizeResponse()
+            operation.response.Unpack(batch_response)
+
+            logger.info(f"Unpacked response type: {type(batch_response)}")
+
+            results = self._parse_results(batch_response)
 
             # Add done flag to results
             results["done"] = True
