@@ -22,7 +22,9 @@ from google.cloud.speech_v2.types import cloud_speech
 from google.cloud.location import locations_pb2
 from google.api_core.client_options import ClientOptions
 from google.api_core import operations_v1
-from google.protobuf.json_format import MessageToDict
+from google.protobuf.json_format import MessageToDict, Parse
+from google.protobuf import struct_pb2
+import json
 from typing import Dict, Optional, Set
 import logging
 import time
@@ -133,7 +135,21 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             logger.debug(f"No metadata for location {location_id}, skipping")
             continue
 
-        metadata_dict = MessageToDict(loc.metadata, preserving_proto_field_name=True)
+        # The metadata field is a google.protobuf.Any containing LocationsMetadata
+        # We need to unpack it to a Struct first, then convert to dict
+        try:
+            # Try to unpack as a Struct (JSON-like structure)
+            metadata_struct = struct_pb2.Struct()
+            if loc.metadata.Unpack(metadata_struct):
+                # Convert Struct to dict
+                metadata_dict = MessageToDict(metadata_struct, preserving_proto_field_name=True)
+            else:
+                logger.warning(f"Could not unpack metadata for {location_id}, skipping")
+                continue
+        except Exception as e:
+            logger.warning(f"Error parsing metadata for {location_id}: {e}, skipping")
+            continue
+
         languages_map = metadata_dict.get('languages', {})
 
         # Extract models and features for each language
