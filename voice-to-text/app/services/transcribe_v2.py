@@ -22,6 +22,7 @@ from google.cloud.speech_v2.types import cloud_speech
 from google.cloud.location import locations_pb2
 from google.api_core.client_options import ClientOptions
 from google.api_core import operations_v1
+from google.protobuf.json_format import MessageToDict
 from typing import Dict, Optional, Set
 import logging
 import time
@@ -157,20 +158,23 @@ def _query_locations_api(project_id: str, location: str, model: str, language: s
         name=f"projects/{project_id}"
     )
 
-    locations = client.list_locations(request=request)
+    response = client.list_locations(request=request)
 
     # Find our target location
-    for loc in locations:
+    for loc in response.locations:
         if loc.location_id == location:
             # Parse metadata structure
             # Structure: location.metadata → languages (map) → models (map) → modelFeatures
-            metadata = loc.metadata
-
-            if not metadata:
+            # metadata is a protobuf Struct - convert to dict for easier access
+            if not loc.metadata:
                 raise ValueError(f"No metadata available for location {location}")
 
+            metadata_dict = MessageToDict(loc.metadata, preserving_proto_field_name=True)
+
+            logger.debug(f"Location {location} metadata keys: {list(metadata_dict.keys())}")
+
             # Navigate to language
-            languages_map = metadata.get('languages', {})
+            languages_map = metadata_dict.get('languages', {})
             language_metadata = languages_map.get(language)
 
             if not language_metadata:
