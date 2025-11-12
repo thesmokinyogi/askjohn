@@ -420,6 +420,36 @@ class JobStorageService:
             "completed_at": datetime.now().isoformat()
         })
 
+    def delete_job(self, job_id: str):
+        """
+        Delete a job and its associated transcript file.
+
+        Args:
+            job_id: Google operation name
+
+        Raises:
+            KeyError: If job not found
+        """
+        if job_id not in self.jobs:
+            raise KeyError(f"Job not found: {job_id}")
+
+        job = self.jobs[job_id]
+
+        # Delete transcript file if it exists
+        if "transcript_file" in job:
+            transcript_path = self.data_dir / job["transcript_file"]
+            if transcript_path.exists():
+                transcript_path.unlink()
+                logger.info(f"Deleted transcript file: {job['transcript_file']}")
+
+        # Remove from jobs dictionary
+        del self.jobs[job_id]
+
+        # Save updated jobs
+        self._save_jobs()
+
+        logger.info(f"Deleted job: {job_id}")
+
     def list_jobs(
         self,
         status: Optional[str] = None,

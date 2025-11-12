@@ -521,6 +521,33 @@ async def check_job_status(job_id: str):
         )
 
 
+@app.delete("/api/jobs/{job_id:path}")
+async def delete_job(job_id: str):
+    """
+    Delete a transcription job and its transcript file.
+
+    Args:
+        job_id: The Google operation name (full path with slashes)
+
+    Returns:
+        {"success": true, "job_id": "..."}
+    """
+    try:
+        job_storage.delete_job(job_id)
+
+        return JSONResponse(content={
+            "success": True,
+            "job_id": job_id,
+            "message": "Job deleted successfully"
+        })
+
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    except Exception as e:
+        logger.error(f"Error deleting job {job_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete job: {str(e)}")
+
+
 @app.get("/api/jobs")
 async def list_jobs(status: str = None, limit: int = 100):
     """
