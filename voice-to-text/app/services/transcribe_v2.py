@@ -381,7 +381,12 @@ class GoogleSpeechV2Service:
                     "metadata": None
                 }
 
-            # Unpack the response from protobuf Any wrapper
+            # CRITICAL: Unpack the response from protobuf Any wrapper
+            # Google Cloud Long-Running Operations return responses wrapped in
+            # google.protobuf.any_pb2.Any as a generic container. We must call
+            # .Unpack() to deserialize into the actual BatchRecognizeResponse type.
+            # Without this, the response has no 'results' attribute and parsing fails.
+            # See: https://googleapis.dev/python/google-api-core/latest/operation.html
             batch_response = cloud_speech.BatchRecognizeResponse()
             operation.response.Unpack(batch_response)
 

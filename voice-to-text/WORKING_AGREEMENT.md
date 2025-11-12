@@ -226,22 +226,50 @@ Verification catches problems before they enter the codebase:
 
 ### Before Implementing New APIs/Libraries
 
-**Principle:** Be thorough with documentation BEFORE writing code. Let documentation be the test oracle, not the user.
+**Principle:** Study working code samples FIRST. The *usage pattern* matters as much as the *data structure*.
 
-- [ ] **Find complete working example:** Not just mentions - full, runnable code
-- [ ] **Read constructor/method signature:** What parameters exist? Which are required?
+**Why This Matters:**
+- Type definitions show what data looks like, but not how to use it
+- Official samples reveal critical steps (unpacking, initialization, error handling)
+- Documentation may skip "obvious" steps that aren't obvious
+- V1/V2 API differences often appear in usage patterns, not just types
+
+**Practice:**
+- [ ] **Find official working code samples:** Not just type definitions - actual runnable examples
+- [ ] **Study the full flow:** Initialization → API call → Response handling → Result extraction
+- [ ] **Note all transformation steps:** Unpacking, deserialization, type conversions
+- [ ] **Read constructor/method signatures:** What parameters exist? Which are required?
 - [ ] **Identify all required parameters:** Don't guess - verify each one
 - [ ] **Understand parameter purpose:** What does each parameter do? What are valid values?
 - [ ] **Check for sensible defaults:** What are recommended values for our use case?
 - [ ] **Look for gotchas:** Common errors, version differences, edge cases
 
-**Anti-pattern:** Finding "you need X API" and immediately implementing with minimal parameters. This creates error-driven development where user discovers missing requirements.
+**Anti-patterns:**
+- Reading type definitions without seeing usage examples
+- Finding "you need X API" and immediately implementing with minimal parameters
+- Assuming V2 works like V1 (usage patterns change)
+- Focusing on final data structure, ignoring transformation steps
+
+**Example (V2 BatchRecognizeResponse parsing):**
+- ✗ Researched: `BatchRecognizeResponse` structure (what fields it has)
+- ✗ Missed: Response comes wrapped in `google.protobuf.any_pb2.Any` - must call `.Unpack()` first
+- ✗ Result: Parsing code tried to access `.results` on wrapper → empty transcripts
+- ✓ Should have: Found working sample code → seen the `operation.response.Unpack(batch_response)` step → implemented correctly first try
 
 **Example (M4A transcription):**
 - ✗ Found: "Use ExplicitDecodingConfig for M4A" → implemented with just `encoding` → user hit error about missing `audio_channel_count`
 - ✓ Should have: Found complete example → saw it needs `encoding`, `sample_rate_hertz`, `audio_channel_count` → implemented all three → worked first try
 
-**Test:** Would this code work on first try if I followed the documentation completely?
+**Where to Look:**
+1. Official GitHub repo examples (google-cloud-python, etc.)
+2. API reference "Examples" sections (not just type definitions)
+3. Quickstart guides with full code
+4. Integration tests in library source code
+
+**Test Questions:**
+- Have I seen this API actually used in working code?
+- Do I understand every step from API call to usable result?
+- Would this code work on first try if I followed the sample completely?
 
 ---
 
@@ -490,6 +518,7 @@ Alternative would be Write for cleaner before/after, but Edit gives incremental 
 | 1.3 | 2025-11-10 | Added "When Debugging Repeated Failures" - search strategy for "X not working" vs "how to do X" |
 | 1.4 | 2025-11-10 | Added "Root Cause Over Band-Aids" principle - fix underlying problems, resist outcome theater, value craftsmanship |
 | 1.5 | 2025-11-10 | Added "Verify Before Trust" principle - empirically validate resources work and are current before depending on them |
+| 1.6 | 2025-11-11 | Expanded "Before Implementing New APIs/Libraries" - study working code samples FIRST, usage patterns matter as much as data structures |
 
 ---
 
