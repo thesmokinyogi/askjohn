@@ -135,11 +135,26 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             logger.debug(f"No metadata for location {location_id}, skipping")
             continue
 
-        # Proto-plus messages support native dict() conversion
+        # Location objects are raw protobuf (locations_pb2), not proto-plus
+        # Use MessageToDict for conversion
         try:
-            # Convert location to dict - proto-plus handles nested types
-            location_dict = dict(loc)
+            # OBSERVATION: What type is this object?
+            logger.info(f"🔍 {location_id}: type(loc) = {type(loc)}")
+            logger.info(f"🔍 {location_id}: type(loc).__name__ = {type(loc).__name__}")
+
+            # OBSERVATION: Convert to dict using MessageToDict
+            logger.info(f"🔍 {location_id}: Attempting MessageToDict(loc)...")
+            location_dict = MessageToDict(loc)
+            logger.info(f"🔍 {location_id}: ✓ MessageToDict succeeded! Keys: {list(location_dict.keys())}")
+
+            # OBSERVATION: What's in metadata?
             metadata_dict = location_dict.get('metadata', {})
+            logger.info(f"🔍 {location_id}: type(metadata_dict) = {type(metadata_dict)}")
+            logger.info(f"🔍 {location_id}: metadata_dict is empty? {not metadata_dict}")
+
+            if metadata_dict:
+                logger.info(f"🔍 {location_id}: isinstance(metadata_dict, dict) = {isinstance(metadata_dict, dict)}")
+                logger.info(f"🔍 {location_id}: metadata_dict.keys() = {list(metadata_dict.keys())[:10]}")
 
             if not metadata_dict:
                 logger.warning(f"No metadata found in {location_id}, skipping")
@@ -148,7 +163,9 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             logger.debug(f"✓ {location_id}: Extracted metadata with {len(metadata_dict)} top-level keys")
 
         except Exception as e:
-            logger.warning(f"Error extracting metadata for {location_id}: {e}, skipping")
+            logger.warning(f"Error extracting metadata for {location_id}: {type(e).__name__}: {e}, skipping")
+            import traceback
+            logger.warning(f"Stack trace: {traceback.format_exc()}")
             continue
 
         languages_map = metadata_dict.get('languages', {})
