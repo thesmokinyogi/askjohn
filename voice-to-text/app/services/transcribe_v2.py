@@ -19,13 +19,246 @@ V2 Regional Architecture:
 
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.speech_v2.types import cloud_speech
+from google.cloud.location import locations_pb2
 from google.api_core.client_options import ClientOptions
 from google.api_core import operations_v1
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 import logging
 import time
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# MODULE-LEVEL FEATURE CACHE
+# ============================================================================
+# Pre-warmed on service startup, lives for process lifetime
+# Key: (model, language) -> Value: set of supported feature keys
+_FEATURE_CACHE: Dict[tuple, Set[str]] = {}
+_CACHE_LOADED = False
+
+# ============================================================================
+# FEATURE MAPPING TABLE
+# ============================================================================
+# Maps RecognitionFeatures protobuf fields → Locations API feature keys
+# Source: Gemini analysis of Google Speech V2 documentation (2025-11-12)
+# Reference: MDs/Speech-to-Text Model Feature Support.md
+FEATURE_MAPPING = {
+    'profanity_filter': 'profanity_filter',
+    'enable_word_time_offsets': 'word_level_timestamps',
+    'enable_word_confidence': 'word_level_confidence',
+    'enable_automatic_punctuation': 'automatic_punctuation',
+    'enable_spoken_punctuation': 'spoken_punctuation',
+    'enable_spoken_emojis': 'spoken_emojis',
+    'diarization_config': 'speaker_diarization',
+    # Note: max_alternatives is a standard config parameter, not a queryable feature
+    # Note: multi_channel_mode is a parameter, not a feature flag
+}
+
+# ============================================================================
+# MINIMAL STATIC FALLBACK
+# ============================================================================
+# Emergency fallback if Locations API is unavailable
+# ONLY includes combinations that have explicitly failed in production
+# Format: (model, feature_key)
+KNOWN_UNSUPPORTED = {
+    ('chirp', 'word_level_confidence'),
+    ('chirp_2', 'word_level_confidence'),
+}
+
+
+# ============================================================================
+# FEATURE DETECTION FUNCTIONS
+# ============================================================================
+
+def initialize_feature_cache(project_id: str, location: str, models: list[str], languages: list[str] = None):
+    """
+    Pre-warm feature cache on service startup.
+
+    Queries Locations API once for configured models and languages.
+    Retries on failure, falls back to minimal static data if unavailable.
+
+    Args:
+        project_id: Google Cloud project ID
+        location: Regional location (e.g., 'us-central1')
+        models: List of models to pre-warm (e.g., ['chirp', 'latest_long'])
+        languages: List of languages (defaults to ['en-US'])
+
+    Returns:
+        bool: True if cache loaded successfully, False if using fallback
+    """
+    global _FEATURE_CACHE, _CACHE_LOADED
+
+    if languages is None:
+        languages = ['en-US']
+
+    # Retry with exponential backoff
+    retry_delays = [1, 2, 4]  # Total: ~7 seconds
+
+    for attempt, delay in enumerate(retry_delays + [None]):
+        try:
+            # Query Locations API for each model/language combination
+            for model in models:
+                for language in languages:
+                    features = _query_locations_api(project_id, location, model, language)
+                    _FEATURE_CACHE[(model, language)] = features
+                    logger.info(f"✓ Loaded features for {model}/{language}: {len(features)} supported")
+
+            _CACHE_LOADED = True
+            logger.info(f"Feature cache initialized: {len(_FEATURE_CACHE)} model/language combinations")
+            return True
+
+        except Exception as e:
+            if delay is not None:
+                logger.warning(
+                    f"Locations API unavailable (attempt {attempt + 1}/{len(retry_delays)}): {e}. "
+                    f"Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                # All retries exhausted
+                logger.error(
+                    f"⚠️  DEGRADED: Locations API unavailable after {len(retry_delays)} retries. "
+                    f"Using minimal static fallback. Feature detection may be incorrect. "
+                    f"Error: {e}"
+                )
+                _CACHE_LOADED = False
+                return False
+
+    return False
+
+
+def _query_locations_api(project_id: str, location: str, model: str, language: str) -> Set[str]:
+    """
+    Query Locations API to discover supported features for a model/language.
+
+    Navigates the metadata hierarchy:
+    Location → languages[language] → models[model] → modelFeatures
+
+    Args:
+        project_id: Google Cloud project ID
+        location: Regional location (e.g., 'us-central1')
+        model: Model identifier (e.g., 'chirp', 'latest_long')
+        language: BCP-47 language code (e.g., 'en-US')
+
+    Returns:
+        Set of feature keys supported by this model/language combination
+
+    Raises:
+        Exception: If API call fails or metadata structure unexpected
+    """
+    # Create client with regional endpoint
+    api_endpoint = f"{location}-speech.googleapis.com"
+    client = SpeechClient(
+        client_options=ClientOptions(api_endpoint=api_endpoint)
+    )
+
+    # Query locations for this project
+    request = locations_pb2.ListLocationsRequest(
+        name=f"projects/{project_id}"
+    )
+
+    locations = client.list_locations(request=request)
+
+    # Find our target location
+    for loc in locations:
+        if loc.location_id == location:
+            # Parse metadata structure
+            # Structure: location.metadata → languages (map) → models (map) → modelFeatures
+            metadata = loc.metadata
+
+            if not metadata:
+                raise ValueError(f"No metadata available for location {location}")
+
+            # Navigate to language
+            languages_map = metadata.get('languages', {})
+            language_metadata = languages_map.get(language)
+
+            if not language_metadata:
+                raise ValueError(f"Language {language} not found in location {location}")
+
+            # Navigate to model
+            models_map = language_metadata.get('models', {})
+            model_metadata = models_map.get(model)
+
+            if not model_metadata:
+                raise ValueError(f"Model {model} not found for language {language} in location {location}")
+
+            # Extract features
+            model_features = model_metadata.get('modelFeatures', {})
+            feature_list = model_features.get('modelFeature', [])
+
+            # Extract feature names (ignore releaseState for now)
+            supported_features = set()
+            for feature_obj in feature_list:
+                if hasattr(feature_obj, 'feature'):
+                    supported_features.add(feature_obj.feature)
+                elif isinstance(feature_obj, dict):
+                    supported_features.add(feature_obj.get('feature'))
+
+            logger.debug(f"Discovered features for {model}/{language}: {supported_features}")
+            return supported_features
+
+    raise ValueError(f"Location {location} not found in project {project_id}")
+
+
+def get_supported_features(model: str, language: str = 'en-US') -> Set[str]:
+    """
+    Get supported features for a model/language combination.
+
+    Fast lookup from pre-warmed cache. Falls back to static data if cache not loaded.
+
+    Args:
+        model: Model identifier (e.g., 'chirp', 'latest_long')
+        language: BCP-47 language code (defaults to 'en-US')
+
+    Returns:
+        Set of feature keys supported by this model/language
+    """
+    global _FEATURE_CACHE, _CACHE_LOADED
+
+    # Check cache first (fast path)
+    cache_key = (model, language)
+    if cache_key in _FEATURE_CACHE:
+        return _FEATURE_CACHE[cache_key]
+
+    # Cache not loaded or model not in cache
+    if not _CACHE_LOADED:
+        logger.warning(
+            f"Feature cache not loaded. Using minimal fallback for {model}/{language}. "
+            f"Some features may be incorrectly disabled."
+        )
+        return _get_fallback_features(model)
+
+    # Model not in cache (shouldn't happen with pre-warming, but handle gracefully)
+    logger.error(
+        f"Unexpected cache miss for {model}/{language}. "
+        f"Model may not be configured for pre-warming. Using fallback."
+    )
+    return _get_fallback_features(model)
+
+
+def _get_fallback_features(model: str) -> Set[str]:
+    """
+    Emergency fallback when Locations API unavailable.
+
+    Returns safe minimal feature set: only features known to work.
+    Blocks features that have explicitly failed in production.
+
+    Args:
+        model: Model identifier
+
+    Returns:
+        Set of feature keys (conservative - only known-safe features)
+    """
+    # Start with universally safe features (work on all models)
+    safe_features = {
+        'automatic_punctuation',
+        'word_level_timestamps',
+    }
+
+    # Remove features known to be unsupported for this model
+    unsupported = {feature for (m, feature) in KNOWN_UNSUPPORTED if m == model}
+    return safe_features - unsupported
 
 
 class GoogleSpeechV2Service:
@@ -607,6 +840,39 @@ class GoogleSpeechV2Service:
                 'auto_decoding_config': cloud_speech.AutoDetectDecodingConfig()
             }
 
+        # ===================================================================
+        # DYNAMIC FEATURE DETECTION
+        # ===================================================================
+        # Query supported features for this model/language combination
+        # Only enable features that are actually supported to prevent API errors
+        supported_features = get_supported_features(self.model, language_code)
+
+        # Build feature configuration dynamically
+        feature_config = {}
+
+        # Map desired features to API keys and check support
+        # Automatic punctuation
+        if 'automatic_punctuation' in supported_features:
+            feature_config['enable_automatic_punctuation'] = True
+        else:
+            logger.info(f"Skipping automatic_punctuation (unsupported by {self.model}/{language_code})")
+
+        # Word timestamps
+        if 'word_level_timestamps' in supported_features:
+            feature_config['enable_word_time_offsets'] = True
+        else:
+            logger.info(f"Skipping word_time_offsets (unsupported by {self.model}/{language_code})")
+
+        # Word confidence scores
+        if 'word_level_confidence' in supported_features:
+            feature_config['enable_word_confidence'] = True
+        else:
+            logger.info(f"Skipping word_confidence (unsupported by {self.model}/{language_code})")
+
+        # Log enabled features for debugging
+        enabled_features = [k for k, v in feature_config.items() if v]
+        logger.info(f"Enabled features for {self.model}/{language_code}: {enabled_features}")
+
         # TODO: Fix phrase hints syntax for V2 API
         # V2 has different syntax than V1 for custom vocabulary
         # Temporarily disabled to get transcription working
@@ -618,11 +884,7 @@ class GoogleSpeechV2Service:
             **decoding_config_kwargs,
             language_codes=[language_code],
             model=self.model,
-            features=cloud_speech.RecognitionFeatures(
-                enable_automatic_punctuation=True,
-                enable_word_time_offsets=True,
-                enable_word_confidence=True,
-            ),
+            features=cloud_speech.RecognitionFeatures(**feature_config),
             # TODO: Re-enable after fixing phrase hints syntax
             # adaptation=cloud_speech.SpeechAdaptation(
             #     phrase_sets=[phrase_hints]

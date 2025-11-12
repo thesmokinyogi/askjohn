@@ -11,12 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from typing import Dict, Any
 import os
+import json
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
 
 # Import services
-from app.services.transcribe_v2 import get_transcription_service_v2
+from app.services.transcribe_v2 import get_transcription_service_v2, initialize_feature_cache
 from app.services.storage import CloudStorageService
 from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
@@ -127,6 +128,26 @@ async def startup_event():
         if not storage_service.verify_bucket_access():
             logger.error(f"Cannot access GCS bucket: {GCS_BUCKET_NAME}")
             logger.error("Please verify bucket exists and credentials are correct")
+
+        # Pre-warm feature cache for model-aware feature detection
+        # This prevents unsupported feature errors (e.g., chirp + word_confidence)
+        logger.info("Initializing feature cache for model-aware transcription...")
+
+        # Models available in the UI (mapped to API names in model_mapping)
+        active_models = ['chirp', 'long', 'short']
+        primary_languages = ['en-US']
+
+        cache_loaded = initialize_feature_cache(
+            project_id=GOOGLE_CLOUD_PROJECT,
+            location=SPEECH_LOCATION,
+            models=active_models,
+            languages=primary_languages
+        )
+
+        if cache_loaded:
+            logger.info("✓ Feature cache initialized - model-aware transcription ready")
+        else:
+            logger.warning("⚠️  Feature cache degraded - using fallback detection")
 
 
 @app.get("/", response_class=HTMLResponse)
