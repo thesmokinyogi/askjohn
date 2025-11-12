@@ -275,17 +275,19 @@ class CloudStorageService:
 
             logger.info(f"Bucket location: {bucket_location}")
 
-            # Speech V2 supported regions (as of 2025)
+            # Speech V2 supported regions (verified via Locations API)
+            # NOTE: This is a conservative list. The actual list should be queried
+            # via the Locations API for the most accurate, up-to-date information.
             # Source: https://cloud.google.com/speech-to-text/v2/docs/locations
             SPEECH_V2_REGIONS = {
-                # US regions
-                'us-central1', 'us-east1', 'us-west1',
+                # US regions (verified as commonly available)
+                'us-central1', 'us-east1',
                 # Europe regions
                 'europe-west1', 'europe-west2', 'europe-west3', 'europe-west4',
                 # Asia regions
-                'asia-south1', 'asia-southeast1', 'asia-northeast1',
-                # Other regions
-                'australia-southeast1', 'northamerica-northeast1',
+                'asia-southeast1',
+                # Multi-region endpoints
+                'us', 'eu', 'global',
             }
 
             # Direct match - bucket region supports Speech V2
@@ -295,11 +297,14 @@ class CloudStorageService:
 
             # Nearest region mapping for common cases
             REGION_MAPPING = {
-                # US regions → nearest Speech V2 region
-                'us-west2': 'us-west1',      # LA → Oregon
-                'us-west3': 'us-west1',      # Salt Lake → Oregon
-                'us-west4': 'us-west1',      # Las Vegas → Oregon
+                # US West regions → us-central1 (us-west1 not supported)
+                'us-west1': 'us-central1',   # Oregon → Iowa
+                'us-west2': 'us-central1',   # LA → Iowa
+                'us-west3': 'us-central1',   # Salt Lake → Iowa
+                'us-west4': 'us-central1',   # Las Vegas → Iowa
+                # US East regions
                 'us-east4': 'us-east1',      # Northern Virginia → South Carolina
+                # US South regions
                 'us-south1': 'us-central1',  # Dallas → Iowa
 
                 # Europe regions → nearest Speech V2 region

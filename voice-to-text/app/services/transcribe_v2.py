@@ -163,6 +163,10 @@ def _query_locations_api(project_id: str, location: str, model: str, language: s
 
     response = client.list_locations(request=request)
 
+    # Collect available locations for better error messages
+    available_locations = [loc.location_id for loc in response.locations]
+    logger.debug(f"Available Speech V2 locations: {available_locations}")
+
     # Find our target location
     for loc in response.locations:
         if loc.location_id == location:
@@ -220,7 +224,12 @@ def _query_locations_api(project_id: str, location: str, model: str, language: s
             logger.info(f"Discovered {len(supported_features)} features for {model}/{language}: {sorted(supported_features)}")
             return supported_features
 
-    raise ValueError(f"Location {location} not found in project {project_id}")
+    # Location not found - provide helpful error with available options
+    raise ValueError(
+        f"Location '{location}' not available for Speech-to-Text V2 in project {project_id}. "
+        f"Available locations: {available_locations}. "
+        f"Consider using 'us-central1' or 'global' if your bucket location is not directly supported."
+    )
 
 
 def get_supported_features(model: str, language: str = 'en-US') -> Set[str]:
