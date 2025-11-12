@@ -392,9 +392,13 @@ class GoogleSpeechV2Service:
                 }
 
             # Unpack response to get BatchRecognizeResponse
-            # This is still wrapped in protobuf Any but we only need the URI
-            batch_response = cloud_speech.BatchRecognizeResponse()
-            batch_response.ParseFromString(operation.response.value)
+            # Use the official helper from google-api-core (same as operation.result() uses internally)
+            from google.api_core import protobuf_helpers
+
+            batch_response = protobuf_helpers.from_any_pb(
+                cloud_speech.BatchRecognizeResponse,
+                operation.response
+            )
 
             # Get GCS result URI from response
             # Results are keyed by the original audio URI
