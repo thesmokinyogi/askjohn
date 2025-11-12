@@ -17,7 +17,12 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # Import services
-from app.services.transcribe_v2 import get_transcription_service_v2, initialize_feature_cache
+from app.services.transcribe_v2 import (
+    get_transcription_service_v2,
+    initialize_metadata_cache,
+    get_available_locations,
+    get_available_models
+)
 from app.services.storage import CloudStorageService
 from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
@@ -129,25 +134,38 @@ async def startup_event():
             logger.error(f"Cannot access GCS bucket: {GCS_BUCKET_NAME}")
             logger.error("Please verify bucket exists and credentials are correct")
 
-        # Pre-warm feature cache for model-aware feature detection
-        # This prevents unsupported feature errors (e.g., chirp + word_confidence)
-        logger.info("Initializing feature cache for model-aware transcription...")
+        # Discover all available Speech V2 metadata from Locations API
+        # This is the single source of truth for regions, models, and features
+        logger.info("Discovering Speech V2 metadata from Locations API...")
 
-        # Models available in the UI (mapped to API names in model_mapping)
-        active_models = ['chirp', 'long', 'short']
         primary_languages = ['en-US']
 
-        cache_loaded = initialize_feature_cache(
+        cache_loaded = initialize_metadata_cache(
             project_id=GOOGLE_CLOUD_PROJECT,
-            location=SPEECH_LOCATION,
-            models=active_models,
             languages=primary_languages
         )
 
         if cache_loaded:
-            logger.info("✓ Feature cache initialized - model-aware transcription ready")
+            logger.info("✓ Metadata discovery complete - using dynamic configuration")
+
+            # Log what we discovered for this location
+            available_locs = get_available_locations()
+            logger.info(f"  Discovered {len(available_locs)} Speech V2 locations")
+
+            if SPEECH_LOCATION in available_locs:
+                logger.info(f"  ✓ Current location '{SPEECH_LOCATION}' is supported")
+            else:
+                logger.warning(f"  ⚠️  Current location '{SPEECH_LOCATION}' not in discovered locations")
+                logger.warning(f"     Available: {sorted(available_locs)}")
+
+            # Log available models for our location
+            available_models = get_available_models(SPEECH_LOCATION, 'en-US')
+            if available_models:
+                logger.info(f"  Models available in {SPEECH_LOCATION}: {sorted(available_models)}")
+            else:
+                logger.warning(f"  No models found for {SPEECH_LOCATION}/en-US")
         else:
-            logger.warning("⚠️  Feature cache degraded - using fallback detection")
+            logger.warning("⚠️  Metadata discovery failed - using hardcoded fallback")
 
 
 @app.get("/", response_class=HTMLResponse)

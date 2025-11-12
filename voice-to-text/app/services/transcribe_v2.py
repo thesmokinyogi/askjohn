@@ -30,11 +30,23 @@ import time
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# MODULE-LEVEL FEATURE CACHE
+# MODULE-LEVEL METADATA CACHE
 # ============================================================================
-# Pre-warmed on service startup, lives for process lifetime
-# Key: (model, language) -> Value: set of supported feature keys
+# Comprehensive Speech V2 metadata discovered from Locations API at startup
+# This is the single source of truth for all regional/model configuration
+
+# Available Speech V2 locations (regions that support the API)
+_AVAILABLE_LOCATIONS: Set[str] = set()
+
+# Available models per location/language
+# Key: (location, language) -> Value: set of model IDs
+_AVAILABLE_MODELS: Dict[tuple, Set[str]] = {}
+
+# Supported features per model/language/location
+# Key: (location, language, model) -> Value: set of feature keys
 _FEATURE_CACHE: Dict[tuple, Set[str]] = {}
+
+# Cache loaded flag
 _CACHE_LOADED = False
 
 # ============================================================================
@@ -68,8 +80,254 @@ KNOWN_UNSUPPORTED = {
 
 
 # ============================================================================
-# FEATURE DETECTION FUNCTIONS
+# METADATA DISCOVERY FUNCTIONS
 # ============================================================================
+
+def discover_speech_metadata(project_id: str, languages: list[str] = None) -> dict:
+    """
+    Query Locations API to discover ALL available Speech V2 metadata.
+
+    This is the single source of truth for Speech V2 configuration.
+    Replaces all hardcoded lists of regions, models, and features.
+
+    Args:
+        project_id: Google Cloud project ID
+        languages: Languages to query (defaults to ['en-US'])
+
+    Returns:
+        dict with keys:
+            - 'available_locations': Set of location IDs that support Speech V2
+            - 'models_by_location': Dict[(location, language)] -> Set[model_ids]
+            - 'features_by_model': Dict[(location, language, model)] -> Set[feature_keys]
+            - 'success': bool indicating if discovery succeeded
+
+    Raises:
+        Exception: If Locations API is completely unavailable
+    """
+    if languages is None:
+        languages = ['en-US']
+
+    logger.info("Discovering Speech V2 metadata from Locations API...")
+
+    # Create client (no specific endpoint - query for all locations)
+    client = SpeechClient()
+
+    # Query all locations for this project
+    request = locations_pb2.ListLocationsRequest(
+        name=f"projects/{project_id}"
+    )
+
+    response = client.list_locations(request=request)
+
+    # Extract comprehensive metadata
+    available_locations = set()
+    models_by_location = {}
+    features_by_model = {}
+
+    for loc in response.locations:
+        location_id = loc.location_id
+        available_locations.add(location_id)
+
+        # Parse metadata
+        if not loc.metadata:
+            logger.debug(f"No metadata for location {location_id}, skipping")
+            continue
+
+        metadata_dict = MessageToDict(loc.metadata, preserving_proto_field_name=True)
+        languages_map = metadata_dict.get('languages', {})
+
+        # Extract models and features for each language
+        for language in languages:
+            language_metadata = languages_map.get(language)
+            if not language_metadata:
+                logger.debug(f"Language {language} not available in {location_id}")
+                continue
+
+            models_map = language_metadata.get('models', {})
+            if not models_map:
+                logger.debug(f"No models found for {language} in {location_id}")
+                continue
+
+            # Track which models are available
+            cache_key = (location_id, language)
+            models_by_location[cache_key] = set(models_map.keys())
+
+            # Extract features for each model
+            for model_id, model_metadata in models_map.items():
+                model_features = model_metadata.get('modelFeatures', {})
+                feature_list = model_features.get('modelFeature', [])
+
+                # Extract feature names
+                supported_features = set()
+                for feature_obj in feature_list:
+                    if isinstance(feature_obj, dict):
+                        feature_name = feature_obj.get('feature')
+                        if feature_name:
+                            supported_features.add(feature_name)
+
+                # Store in features cache
+                feature_key = (location_id, language, model_id)
+                features_by_model[feature_key] = supported_features
+
+                logger.debug(
+                    f"  {location_id}/{language}/{model_id}: "
+                    f"{len(supported_features)} features"
+                )
+
+    logger.info(
+        f"✓ Discovered metadata: {len(available_locations)} locations, "
+        f"{len(models_by_location)} location/language combinations, "
+        f"{len(features_by_model)} model/feature sets"
+    )
+
+    return {
+        'available_locations': available_locations,
+        'models_by_location': models_by_location,
+        'features_by_model': features_by_model,
+        'success': True
+    }
+
+
+def initialize_metadata_cache(project_id: str, languages: list[str] = None) -> bool:
+    """
+    Pre-warm comprehensive metadata cache on service startup.
+
+    Replaces the old initialize_feature_cache with a comprehensive discovery
+    that populates ALL metadata caches from a single Locations API query.
+
+    Args:
+        project_id: Google Cloud project ID
+        languages: Languages to discover (defaults to ['en-US'])
+
+    Returns:
+        bool: True if cache loaded successfully, False if using fallback
+    """
+    global _AVAILABLE_LOCATIONS, _AVAILABLE_MODELS, _FEATURE_CACHE, _CACHE_LOADED
+
+    if languages is None:
+        languages = ['en-US']
+
+    # Retry with exponential backoff
+    retry_delays = [1, 2, 4]  # Total: ~7 seconds
+
+    for attempt, delay in enumerate(retry_delays + [None]):
+        try:
+            # Discover all metadata in one API call
+            metadata = discover_speech_metadata(project_id, languages)
+
+            # Populate module-level caches
+            _AVAILABLE_LOCATIONS = metadata['available_locations']
+            _AVAILABLE_MODELS = metadata['models_by_location']
+            _FEATURE_CACHE = metadata['features_by_model']
+            _CACHE_LOADED = True
+
+            # Log summary
+            logger.info(f"✓ Metadata cache initialized successfully")
+            logger.info(f"  Available locations: {sorted(_AVAILABLE_LOCATIONS)}")
+
+            # Log available models per language
+            for language in languages:
+                # Find all locations that have this language
+                models_for_lang = set()
+                for (loc, lang), models in _AVAILABLE_MODELS.items():
+                    if lang == language:
+                        models_for_lang.update(models)
+
+                if models_for_lang:
+                    logger.info(f"  Available models for {language}: {sorted(models_for_lang)}")
+
+            return True
+
+        except Exception as e:
+            if delay is not None:
+                logger.warning(
+                    f"Locations API unavailable (attempt {attempt + 1}/{len(retry_delays)}): {e}. "
+                    f"Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                # All retries exhausted
+                logger.error(
+                    f"⚠️  DEGRADED: Locations API unavailable after {len(retry_delays)} retries. "
+                    f"Using minimal static fallback. Error: {e}"
+                )
+                logger.error(
+                    "⚠️  Impact: Dynamic metadata discovery disabled. "
+                    "Using hardcoded fallback data. Some configurations may fail at runtime."
+                )
+                _CACHE_LOADED = False
+                return False
+
+    return False
+
+
+# ============================================================================
+# METADATA ACCESSOR FUNCTIONS
+# ============================================================================
+
+def get_available_locations() -> Set[str]:
+    """
+    Get all Speech V2 locations discovered from the API.
+
+    Returns:
+        Set of location IDs (e.g., {'us-central1', 'europe-west1', ...})
+    """
+    return _AVAILABLE_LOCATIONS.copy() if _AVAILABLE_LOCATIONS else set()
+
+
+def get_available_models(location: str, language: str = 'en-US') -> Set[str]:
+    """
+    Get all models available for a specific location/language.
+
+    Args:
+        location: Location ID (e.g., 'us-central1')
+        language: BCP-47 language code (defaults to 'en-US')
+
+    Returns:
+        Set of model IDs available for this location/language
+    """
+    cache_key = (location, language)
+    return _AVAILABLE_MODELS.get(cache_key, set()).copy()
+
+
+def get_supported_features(model: str, language: str = 'en-US', location: str = None) -> Set[str]:
+    """
+    Get supported features for a model/language/location combination.
+
+    Args:
+        model: Model identifier (e.g., 'chirp', 'long')
+        language: BCP-47 language code (defaults to 'en-US')
+        location: Location ID (optional, will search all locations if not specified)
+
+    Returns:
+        Set of feature keys supported by this combination
+    """
+    global _FEATURE_CACHE, _CACHE_LOADED
+
+    # If location specified, try direct lookup
+    if location:
+        cache_key = (location, language, model)
+        if cache_key in _FEATURE_CACHE:
+            return _FEATURE_CACHE[cache_key].copy()
+
+    # Search all locations for this model/language
+    for (loc, lang, mod), features in _FEATURE_CACHE.items():
+        if mod == model and lang == language:
+            logger.debug(f"Found features for {model}/{language} in location {loc}")
+            return features.copy()
+
+    # Cache miss - use fallback
+    if not _CACHE_LOADED:
+        logger.warning(f"Cache not loaded, using fallback for {model}/{language}")
+        return _get_fallback_features(model, language)
+
+    # Model not found in any location
+    logger.warning(
+        f"Model {model} not found for language {language} in any location. "
+        f"Using empty feature set."
+    )
+    return set()
+
 
 def initialize_feature_cache(project_id: str, location: str, models: list[str], languages: list[str] = None):
     """

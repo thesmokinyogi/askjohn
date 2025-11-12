@@ -275,27 +275,32 @@ class CloudStorageService:
 
             logger.info(f"Bucket location: {bucket_location}")
 
-            # Speech V2 supported regions (verified via Locations API)
-            # NOTE: This is a conservative list. The actual list should be queried
-            # via the Locations API for the most accurate, up-to-date information.
-            # Source: https://cloud.google.com/speech-to-text/v2/docs/locations
-            SPEECH_V2_REGIONS = {
-                # US regions (verified as commonly available)
-                'us-central1', 'us-east1',
-                # Europe regions
-                'europe-west1', 'europe-west2', 'europe-west3', 'europe-west4',
-                # Asia regions
-                'asia-southeast1',
-                # Multi-region endpoints
-                'us', 'eu', 'global',
-            }
+            # Try to get discovered Speech V2 locations from metadata cache
+            # This is the single source of truth - query the API instead of hardcoding
+            speech_v2_regions = None
+            try:
+                from app.services.transcribe_v2 import get_available_locations
+                speech_v2_regions = get_available_locations()
 
-            # Direct match - bucket region supports Speech V2
-            if bucket_location in SPEECH_V2_REGIONS:
-                logger.info(f"✓ Bucket region {bucket_location} supports Speech V2, using it directly")
-                return bucket_location
+                if speech_v2_regions:
+                    logger.info(f"Using {len(speech_v2_regions)} discovered Speech V2 locations")
+
+                    # Direct match - bucket region supports Speech V2
+                    if bucket_location in speech_v2_regions:
+                        logger.info(f"✓ Bucket region {bucket_location} supports Speech V2, using it directly")
+                        return bucket_location
+                else:
+                    logger.warning("No locations discovered yet, using fallback mapping")
+
+            except Exception as e:
+                logger.warning(f"Could not query discovered locations: {e}. Using fallback mapping.")
+
+            # If discovery unavailable, continue with mapping logic
 
             # Nearest region mapping for common cases
+            # NOTE: This is a FALLBACK only. Actual mappings are validated against
+            # discovered locations from Locations API. This table is only used when
+            # discovery is unavailable or for initial mapping suggestions.
             REGION_MAPPING = {
                 # US West regions → us-central1 (us-west1 not supported)
                 'us-west1': 'us-central1',   # Oregon → Iowa
@@ -322,6 +327,21 @@ class CloudStorageService:
             # Check mapping table
             if bucket_location in REGION_MAPPING:
                 mapped_location = REGION_MAPPING[bucket_location]
+
+                # If we have discovered locations, validate the mapping
+                if speech_v2_regions and mapped_location not in speech_v2_regions:
+                    logger.warning(
+                        f"Mapped location {mapped_location} not in discovered locations. "
+                        f"Available: {sorted(speech_v2_regions)}"
+                    )
+                    # Try to find a better match from discovered locations
+                    # Prefer locations with same prefix
+                    prefix = mapped_location.split('-')[0]  # 'us', 'europe', 'asia'
+                    fallback_options = [loc for loc in speech_v2_regions if loc.startswith(prefix)]
+                    if fallback_options:
+                        mapped_location = sorted(fallback_options)[0]
+                        logger.info(f"Using discovered location: {mapped_location}")
+
                 logger.info(f"✓ Mapped bucket region {bucket_location} → Speech V2 region {mapped_location}")
                 return mapped_location
 
