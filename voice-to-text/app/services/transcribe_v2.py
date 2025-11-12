@@ -574,6 +574,12 @@ class GoogleSpeechV2Service:
             total_confidence = 0.0
             word_details = []
 
+            # DEBUG: Log response structure
+            logger.info(f"====== RESPONSE DEBUG ======")
+            logger.info(f"Response type: {type(response)}")
+            logger.info(f"Response dir: {[attr for attr in dir(response) if not attr.startswith('_')][:20]}")
+            logger.info(f"Has results: {hasattr(response, 'results')}")
+
             # V2 API: response.results is a map/dict-like object
             # Access it directly if it's a dict, or iterate if it's a repeated field
             if hasattr(response, 'results'):

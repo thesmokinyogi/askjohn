@@ -455,7 +455,7 @@ async def check_job_status(job_id: str):
                 # This tracks our monthly spending
                 from app.services.budget import get_budget_service
                 budget_service = get_budget_service()
-                budget_service.add_usage(
+                budget_service.record_transcription(
                     provider=STT_PROVIDER,
                     cost=actual_cost,
                     duration_minutes=job_record["duration_minutes"]
