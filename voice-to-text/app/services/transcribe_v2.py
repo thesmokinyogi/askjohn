@@ -135,12 +135,10 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             logger.debug(f"No metadata for location {location_id}, skipping")
             continue
 
-        # The metadata field uses proto-plus, not raw protobuf
-        # Use native proto-plus .to_dict() instead of MessageToDict
+        # Proto-plus messages support native dict() conversion
         try:
-            # The location object from proto-plus has a to_dict() method
-            # This handles all nested proto-plus types automatically
-            location_dict = type(loc).to_dict(loc)
+            # Convert location to dict - proto-plus handles nested types
+            location_dict = dict(loc)
             metadata_dict = location_dict.get('metadata', {})
 
             if not metadata_dict:
