@@ -246,7 +246,7 @@ class GoogleSpeechV2Service:
 
         return None
 
-    def submit_job(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None):
+    def submit_job(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None, output_bucket: str = None):
         """
         Submit a transcription job to Google Cloud WITHOUT waiting for completion.
 
@@ -257,6 +257,7 @@ class GoogleSpeechV2Service:
             gcs_uri: Google Cloud Storage URI (gs://bucket/path/file.ext)
             language_code: Language code (default: en-US)
             audio_metadata: Audio file metadata (sample_rate, channels, etc.)
+            output_bucket: GCS bucket for results (default: same as audio bucket)
 
         Returns:
             operation: Google LongRunningOperation object
@@ -264,6 +265,11 @@ class GoogleSpeechV2Service:
                       Use operation.done() to check status later
         """
         try:
+            # Extract bucket from gcs_uri if output_bucket not specified
+            if not output_bucket:
+                # Parse gs://bucket-name/path/file.ext
+                output_bucket = gcs_uri.split('/')[2]
+
             # Build recognition config
             config = self._build_config(
                 audio_encoding=gcs_uri.split('.')[-1],  # Extract extension
@@ -271,14 +277,17 @@ class GoogleSpeechV2Service:
                 audio_metadata=audio_metadata
             )
 
-            # Create batch recognition request
+            # Create batch recognition request with GCS output
+            # Following official pattern from python-docs-samples
             file_metadata = cloud_speech.BatchRecognizeFileMetadata(uri=gcs_uri)
             request = cloud_speech.BatchRecognizeRequest(
                 recognizer=f"projects/{self.project_id}/locations/{self.location}/recognizers/_",
                 config=config,
                 files=[file_metadata],
                 recognition_output_config=cloud_speech.RecognitionOutputConfig(
-                    inline_response_config=cloud_speech.InlineOutputConfig()
+                    gcs_output_config=cloud_speech.GcsOutputConfig(
+                        uri=f"gs://{output_bucket}/transcripts/"
+                    )
                 ),
             )
 
@@ -300,7 +309,7 @@ class GoogleSpeechV2Service:
             logger.error(f"Error submitting transcription job: {e}")
             raise
 
-    def check_job_status(self, job_id: str) -> Dict:
+    def check_job_status(self, job_id: str, gcs_uri: str = None) -> Dict:
         """
         Check the status of a transcription job by reconnecting to Google's operation.
 
@@ -309,6 +318,7 @@ class GoogleSpeechV2Service:
 
         Args:
             job_id: Google operation name (e.g., "projects/.../operations/123")
+            gcs_uri: Original audio GCS URI (needed to look up results)
 
         Returns:
             Dict with status information:
@@ -365,40 +375,82 @@ class GoogleSpeechV2Service:
                     "metadata": None
                 }
 
-            # Job completed successfully - parse results
-            # operation.response contains the BatchRecognizeResponse
-            logger.info(f"Job {job_id} completed successfully, parsing results...")
+            # Job completed successfully - fetch results from GCS
+            # Following official Google pattern from python-docs-samples
+            logger.info(f"Job {job_id} completed successfully, fetching results from GCS...")
 
-            if not hasattr(operation, 'response') or not operation.response:
-                logger.error(f"Job {job_id} completed but has no response data")
+            if not gcs_uri:
+                logger.error(f"Job {job_id} missing gcs_uri - cannot look up results")
                 return {
                     "done": True,
                     "status": "failed",
                     "transcript": None,
                     "confidence": None,
                     "words": None,
-                    "error": "Operation completed but response is empty",
+                    "error": "Missing GCS URI - cannot retrieve results",
                     "metadata": None
                 }
 
-            # CRITICAL: Unpack the response from protobuf Any wrapper
-            # Google Cloud Long-Running Operations return responses wrapped in
-            # google.protobuf.any_pb2.Any as a generic container. We must deserialize
-            # this into the actual BatchRecognizeResponse type.
-            # See: https://googleapis.dev/python/google-api-core/latest/operation.html
-
-            # Log what type is in the Any wrapper
-            logger.info(f"Any type_url: {operation.response.type_url}")
-
-            # Deserialize using ParseFromString instead of Unpack
-            # This is more reliable for Google Cloud LRO responses
+            # Unpack response to get BatchRecognizeResponse
+            # This is still wrapped in protobuf Any but we only need the URI
             batch_response = cloud_speech.BatchRecognizeResponse()
             batch_response.ParseFromString(operation.response.value)
 
-            logger.info(f"Deserialized response type: {type(batch_response)}")
-            logger.info(f"Response has results: {hasattr(batch_response, 'results')}")
+            # Get GCS result URI from response
+            # Results are keyed by the original audio URI
+            if gcs_uri not in batch_response.results:
+                logger.error(f"No results found for {gcs_uri}")
+                return {
+                    "done": True,
+                    "status": "failed",
+                    "transcript": None,
+                    "confidence": None,
+                    "words": None,
+                    "error": f"No results found for audio file",
+                    "metadata": None
+                }
 
-            results = self._parse_results(batch_response)
+            file_result = batch_response.results[gcs_uri]
+            result_gcs_uri = file_result.uri
+            logger.info(f"Fetching results from {result_gcs_uri}")
+
+            # Download results from GCS
+            # Parse bucket and object path from gs://bucket/path/to/results.json
+            import re
+            from google.cloud import storage
+
+            match = re.match(r"gs://([^/]+)/(.*)", result_gcs_uri)
+            if not match:
+                logger.error(f"Invalid GCS URI format: {result_gcs_uri}")
+                return {
+                    "done": True,
+                    "status": "failed",
+                    "transcript": None,
+                    "confidence": None,
+                    "words": None,
+                    "error": "Invalid result URI format",
+                    "metadata": None
+                }
+
+            output_bucket, output_object = match.group(1, 2)
+
+            # Fetch results from GCS
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(output_bucket)
+            blob = bucket.blob(output_object)
+            results_bytes = blob.download_as_bytes()
+
+            # Parse JSON results
+            # Following official pattern: BatchRecognizeResults.from_json()
+            batch_recognize_results = cloud_speech.BatchRecognizeResults.from_json(
+                results_bytes,
+                ignore_unknown_fields=True
+            )
+
+            logger.info(f"Downloaded and parsed {len(batch_recognize_results.results)} result segments")
+
+            # Extract transcript from results
+            results = self._parse_batch_results(batch_recognize_results)
 
             # Add done flag to results
             results["done"] = True
@@ -574,6 +626,73 @@ class GoogleSpeechV2Service:
         )
 
         return config
+
+    def _parse_batch_results(self, batch_results: cloud_speech.BatchRecognizeResults) -> Dict:
+        """
+        Parse BatchRecognizeResults from GCS JSON file.
+
+        This is simpler than parsing the operation response because the JSON
+        is already deserialized into the proper structure.
+
+        Args:
+            batch_results: BatchRecognizeResults from GCS (deserialized JSON)
+
+        Returns:
+            Structured dict with transcript and metadata
+        """
+        try:
+            results = []
+            total_confidence = 0.0
+            word_details = []
+
+            # Iterate through results - this is already properly structured JSON
+            for result in batch_results.results:
+                if result.alternatives:
+                    alternative = result.alternatives[0]  # Best alternative
+
+                    # Append transcript
+                    results.append(alternative.transcript)
+                    total_confidence += alternative.confidence
+
+                    # Extract word-level details if available
+                    if hasattr(alternative, 'words') and alternative.words:
+                        for word_info in alternative.words:
+                            word_details.append({
+                                "word": word_info.word,
+                                "start_time": word_info.start_offset.total_seconds(),
+                                "end_time": word_info.end_offset.total_seconds(),
+                                "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
+                            })
+
+            # Combine results
+            full_transcript = " ".join(results)
+            avg_confidence = total_confidence / len(results) if results else 0.0
+
+            logger.info(f"Parsed {len(results)} segments, {len(word_details)} words")
+
+            return {
+                "success": True,
+                "transcript": full_transcript,
+                "confidence": avg_confidence,
+                "words": word_details,
+                "metadata": {
+                    "total_words": len(word_details),
+                    "model": self.model,
+                    "language": "en-US",
+                    "api_version": "v2"
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error parsing GCS results: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Result parsing error: {str(e)}",
+                "transcript": "",
+                "confidence": 0.0,
+                "words": [],
+                "metadata": {"error_type": "parsing_error"}
+            }
 
     def _parse_results(self, response) -> Dict:
         """

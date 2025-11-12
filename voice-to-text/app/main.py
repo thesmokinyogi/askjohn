@@ -316,7 +316,8 @@ async def transcribe_audio(
             filename=file.filename,
             model=selected_model,
             duration_minutes=duration_minutes,
-            estimated_cost=cost_estimate['total_cost']
+            estimated_cost=cost_estimate['total_cost'],
+            gcs_uri=gcs_uri  # Store for GCS result lookup
         )
 
         # ===== STEP 6: Return immediately =====
@@ -426,7 +427,11 @@ async def check_job_status(job_id: str):
 
         # Reconnect to Google's operation and check status
         # This is non-blocking - returns immediately
-        status_result = transcription_service.check_job_status(job_id)
+        # Pass gcs_uri for GCS result lookup
+        status_result = transcription_service.check_job_status(
+            job_id=job_id,
+            gcs_uri=job_record.get("gcs_uri")
+        )
 
         # ===== STEP 3: Update our job record if status changed =====
 
