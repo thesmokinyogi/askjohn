@@ -13,7 +13,16 @@ from google.cloud.speech_v2.proto.cloud_speech_pb2 import LocationsMetadata
 from google.cloud.location import locations_pb2
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
+from google.api_core.client_options import ClientOptions
 from dotenv import load_dotenv
+
+# Try importing Config and GetConfigRequest (Gemini's suggestion)
+try:
+    from google.cloud.speech_v2.types import Config, GetConfigRequest
+    CONFIG_AVAILABLE = True
+except ImportError as e:
+    CONFIG_AVAILABLE = False
+    CONFIG_IMPORT_ERROR = str(e)
 
 # Load environment variables from .env file (same as server does)
 load_dotenv()
@@ -310,6 +319,110 @@ def observe_metadata_discovery():
                 logger.error(f"      ✗ Unpacking failed: {type(e).__name__}: {e}")
                 import traceback
                 logger.error(f"      {traceback.format_exc()}")
+
+            # Alternative 5: Use get_config() API (Gemini's recommended approach)
+            logger.info(f"\n   E. Use get_config() API (Speech V2-specific):")
+
+            if not CONFIG_AVAILABLE:
+                logger.error(f"      ✗ Config/GetConfigRequest not available")
+                logger.error(f"      Import error: {CONFIG_IMPORT_ERROR}")
+            else:
+                logger.info(f"      ✓ Config and GetConfigRequest imported successfully")
+
+                try:
+                    # Use us-west1 as test region (matches our GCS bucket)
+                    test_region = "us-west1"
+                    logger.info(f"      Testing with region: {test_region}")
+
+                    # Create regional client
+                    regional_client = SpeechClient(
+                        client_options=ClientOptions(
+                            api_endpoint=f"{test_region}-speech.googleapis.com"
+                        )
+                    )
+                    logger.info(f"      ✓ Created regional client for {test_region}")
+
+                    # Build config resource name
+                    config_name = f"projects/{project_id}/locations/{test_region}/config"
+                    logger.info(f"      Config resource: {config_name}")
+
+                    # Call get_config()
+                    config_request = GetConfigRequest(name=config_name)
+                    config_response = regional_client.get_config(request=config_request)
+                    logger.info(f"      ✓ get_config() succeeded!")
+                    logger.info(f"      type(config_response) = {type(config_response)}")
+
+                    # Examine Config structure
+                    logger.info(f"\n      Config object attributes:")
+                    config_attrs = [attr for attr in dir(config_response) if not attr.startswith('_')]
+                    logger.info(f"      {config_attrs[:15]}")
+
+                    # Check for languages
+                    if hasattr(config_response, 'languages'):
+                        logger.info(f"\n      ✓ config_response.languages exists")
+                        logger.info(f"      type(languages) = {type(config_response.languages)}")
+
+                        if config_response.languages:
+                            logger.info(f"      Number of languages: {len(config_response.languages)}")
+
+                            # Show first language
+                            lang_codes = list(config_response.languages.keys())[:5]
+                            logger.info(f"      Language codes (first 5): {lang_codes}")
+
+                            if config_response.languages:
+                                first_lang = list(config_response.languages.keys())[0]
+                                lang_metadata = config_response.languages[first_lang]
+                                logger.info(f"\n      First language: {first_lang}")
+                                logger.info(f"      type(lang_metadata) = {type(lang_metadata)}")
+
+                                # Check for models
+                                if hasattr(lang_metadata, 'models'):
+                                    logger.info(f"      ✓ lang_metadata.models exists")
+                                    logger.info(f"      Number of models: {len(lang_metadata.models)}")
+
+                                    model_ids = list(lang_metadata.models.keys())[:5]
+                                    logger.info(f"      Model IDs (first 5): {model_ids}")
+
+                                    # Examine first model
+                                    if lang_metadata.models:
+                                        first_model = list(lang_metadata.models.keys())[0]
+                                        model_metadata = lang_metadata.models[first_model]
+                                        logger.info(f"\n      First model: {first_model}")
+                                        logger.info(f"      type(model_metadata) = {type(model_metadata)}")
+
+                                        model_attrs = [attr for attr in dir(model_metadata) if not attr.startswith('_')]
+                                        logger.info(f"      model_metadata attributes: {model_attrs[:15]}")
+
+                                        # Check for model_features
+                                        if hasattr(model_metadata, 'model_features'):
+                                            logger.info(f"\n      ✓ model_metadata.model_features exists")
+                                            logger.info(f"      type = {type(model_metadata.model_features)}")
+
+                                            if first_model in model_metadata.model_features:
+                                                features_obj = model_metadata.model_features[first_model]
+                                                logger.info(f"      features_obj type: {type(features_obj)}")
+
+                                                if hasattr(features_obj, 'model_feature'):
+                                                    logger.info(f"      ✓ features_obj.model_feature exists")
+                                                    logger.info(f"      Number of features: {len(features_obj.model_feature)}")
+
+                                                    # Show first few features
+                                                    logger.info(f"\n      Features for {first_model}:")
+                                                    for i, feature in enumerate(features_obj.model_feature[:5]):
+                                                        logger.info(f"         {i+1}. {feature.feature} ({feature.release_state})")
+                                        else:
+                                            logger.warning(f"      model_metadata has no 'model_features' attribute")
+                                else:
+                                    logger.warning(f"      lang_metadata has no 'models' attribute")
+                        else:
+                            logger.warning(f"      config_response.languages is empty")
+                    else:
+                        logger.warning(f"      config_response has no 'languages' attribute")
+
+                except Exception as e:
+                    logger.error(f"      ✗ get_config() approach failed: {type(e).__name__}: {e}")
+                    import traceback
+                    logger.error(f"      {traceback.format_exc()}")
 
         logger.info("\n" + "=" * 80)
         logger.info("OBSERVATION COMPLETE")
