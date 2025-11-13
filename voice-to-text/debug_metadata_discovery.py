@@ -14,6 +14,7 @@ from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 from google.api_core.client_options import ClientOptions
 from dotenv import load_dotenv
+import requests
 
 # Try importing LocationsMetadata (doesn't exist in SDK, but testing)
 try:
@@ -540,6 +541,126 @@ def observe_metadata_discovery():
                     logger.error(f"      ✗ cloud_speech_pb2 approach failed: {type(e).__name__}: {e}")
                     import traceback
                     logger.error(f"      {traceback.format_exc()}")
+
+            # Alternative 7: REST API (Gemini's recommended solution - bypass SDK entirely)
+            logger.info(f"\n   G. Use REST API directly (bypass Python SDK):")
+
+            try:
+                # Get auth token using google.auth (same credentials as SDK)
+                from google.auth import default
+                from google.auth.transport.requests import Request as AuthRequest
+
+                credentials, _ = default()
+                auth_request = AuthRequest()
+                credentials.refresh(auth_request)
+                token = credentials.token
+                logger.info(f"      ✓ Got auth token via google.auth.default()")
+
+                # Use us-west1 as test region
+                test_region = "us-west1"
+                rest_url = f"https://{test_region}-speech.googleapis.com/v2/projects/{project_id}/locations/{test_region}"
+
+                logger.info(f"      REST endpoint: {rest_url}")
+
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+
+                # Make HTTP GET request
+                logger.info(f"      Making GET request...")
+                response = requests.get(rest_url, headers=headers, timeout=10)
+                response.raise_for_status()
+                logger.info(f"      ✓ GET request succeeded! Status: {response.status_code}")
+
+                # Parse JSON response
+                data = response.json()
+                logger.info(f"      Response keys: {list(data.keys())[:10]}")
+
+                # Check for metadata field
+                if 'metadata' in data:
+                    logger.info(f"      ✓ 'metadata' found in response")
+                    metadata = data['metadata']
+                    logger.info(f"      metadata type: {type(metadata)}")
+                    logger.info(f"      metadata keys: {list(metadata.keys())[:10] if isinstance(metadata, dict) else 'N/A'}")
+
+                    # Check for languages
+                    if isinstance(metadata, dict) and 'languages' in metadata:
+                        logger.info(f"\n      ✓✓✓ SUCCESS! 'languages' found in metadata!")
+                        languages = metadata['languages']
+                        logger.info(f"      Number of languages: {len(languages)}")
+
+                        # Show first few language codes
+                        lang_codes = list(languages.keys())[:5]
+                        logger.info(f"      First 5 language codes: {lang_codes}")
+
+                        # Examine first language
+                        if languages:
+                            first_lang = list(languages.keys())[0]
+                            lang_data = languages[first_lang]
+                            logger.info(f"\n      Examining language: {first_lang}")
+                            logger.info(f"      Language data keys: {list(lang_data.keys()) if isinstance(lang_data, dict) else 'N/A'}")
+
+                            # Check for models
+                            if isinstance(lang_data, dict) and 'models' in lang_data:
+                                models = lang_data['models']
+                                logger.info(f"\n      ✓ 'models' found!")
+                                logger.info(f"      Number of models: {len(models)}")
+
+                                model_ids = list(models.keys())[:5]
+                                logger.info(f"      First 5 model IDs: {model_ids}")
+
+                                # Examine first model
+                                if models:
+                                    first_model = list(models.keys())[0]
+                                    model_data = models[first_model]
+                                    logger.info(f"\n      Examining model: {first_model}")
+                                    logger.info(f"      Model data keys: {list(model_data.keys()) if isinstance(model_data, dict) else 'N/A'}")
+
+                                    # Check for modelFeatures (camelCase in JSON)
+                                    if isinstance(model_data, dict) and 'modelFeatures' in model_data:
+                                        model_features = model_data['modelFeatures']
+                                        logger.info(f"\n      ✓✓✓ 'modelFeatures' found!")
+                                        logger.info(f"      Keys in modelFeatures: {list(model_features.keys())[:5] if isinstance(model_features, dict) else 'N/A'}")
+
+                                        # Check if model ID is in modelFeatures map
+                                        if isinstance(model_features, dict) and first_model in model_features:
+                                            features_obj = model_features[first_model]
+                                            logger.info(f"      Features object found for {first_model}")
+                                            logger.info(f"      Features object type: {type(features_obj)}")
+                                            logger.info(f"      Features object keys: {list(features_obj.keys()) if isinstance(features_obj, dict) else 'N/A'}")
+
+                                            # Check for modelFeature array (camelCase)
+                                            if isinstance(features_obj, dict) and 'modelFeature' in features_obj:
+                                                feature_list = features_obj['modelFeature']
+                                                logger.info(f"\n      ✓✓✓ JACKPOT! Found feature list!")
+                                                logger.info(f"      Number of features: {len(feature_list)}")
+
+                                                # Show first few features
+                                                logger.info(f"\n      Features for {first_model} in {first_lang}:")
+                                                for i, feature in enumerate(feature_list[:10]):
+                                                    feature_name = feature.get('feature', 'unknown')
+                                                    release_state = feature.get('releaseState', 'unknown')
+                                                    logger.info(f"         {i+1}. {feature_name} ({release_state})")
+                                            else:
+                                                logger.warning(f"      'modelFeature' not found in features object")
+                                        else:
+                                            logger.warning(f"      {first_model} not in modelFeatures map")
+                                    else:
+                                        logger.warning(f"      'modelFeatures' not found in model data")
+                            else:
+                                logger.warning(f"      'models' not found in language data")
+                    else:
+                        logger.warning(f"      'languages' not found in metadata")
+                        logger.info(f"      metadata content: {str(metadata)[:200]}")
+                else:
+                    logger.warning(f"      'metadata' not found in response")
+                    logger.info(f"      Available keys: {list(data.keys())}")
+
+            except Exception as e:
+                logger.error(f"      ✗ REST API approach failed: {type(e).__name__}: {e}")
+                import traceback
+                logger.error(f"      {traceback.format_exc()}")
 
         logger.info("\n" + "=" * 80)
         logger.info("OBSERVATION COMPLETE")
