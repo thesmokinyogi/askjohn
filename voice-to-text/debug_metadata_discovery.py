@@ -546,15 +546,17 @@ def observe_metadata_discovery():
             logger.info(f"\n   G. Use REST API directly (bypass Python SDK):")
 
             try:
-                # Get auth token using google.auth (same credentials as SDK)
+                # Get auth token using google.auth with explicit scopes
                 from google.auth import default
                 from google.auth.transport.requests import Request as AuthRequest
 
-                credentials, _ = default()
+                # Specify scopes explicitly for REST API usage
+                scopes = ['https://www.googleapis.com/auth/cloud-platform']
+                credentials, _ = default(scopes=scopes)
                 auth_request = AuthRequest()
                 credentials.refresh(auth_request)
                 token = credentials.token
-                logger.info(f"      ✓ Got auth token via google.auth.default()")
+                logger.info(f"      ✓ Got auth token via google.auth.default() with scopes")
 
                 # Use us-west1 as test region
                 test_region = "us-west1"
