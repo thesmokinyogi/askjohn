@@ -9,9 +9,9 @@ import os
 import json
 import logging
 from google.cloud.speech_v2 import SpeechClient
-from google.cloud.speech_v2.types import LocationsMetadata
 from google.cloud.location import locations_pb2
 from google.protobuf.json_format import MessageToDict
+from google.protobuf.struct_pb2 import Struct
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (same as server does)
@@ -198,47 +198,53 @@ def observe_metadata_discovery():
             except Exception as e:
                 logger.error(f"      Failed: {e}")
 
-            # Alternative 3: Unpack Any to LocationsMetadata (Gemini's solution)
-            logger.info(f"\n   C. Unpack Any to LocationsMetadata:")
+            # Alternative 3: Unpack Any to Struct (generic protobuf structure)
+            logger.info(f"\n   C. Unpack Any to Struct:")
             try:
-                # Check if metadata contains LocationsMetadata
-                if loc.metadata.Is(LocationsMetadata.pb()):
-                    logger.info(f"      ✓ metadata.Is(LocationsMetadata) = True")
+                # Unpack to generic Struct
+                struct_metadata = Struct()
+                loc.metadata.Unpack(struct_metadata)
+                logger.info(f"      ✓ Unpacked to Struct successfully!")
 
-                    # Unpack the Any object
-                    location_metadata = LocationsMetadata()
-                    loc.metadata.Unpack(location_metadata)
-                    logger.info(f"      ✓ Unpacked successfully!")
+                # Convert Struct to dict using MessageToDict
+                metadata_dict = MessageToDict(struct_metadata)
+                logger.info(f"      ✓ Converted Struct to dict")
+                logger.info(f"      Keys: {list(metadata_dict.keys())[:10]}")
 
-                    # Check what's in languages
-                    if location_metadata.languages:
-                        logger.info(f"      ✓ Found {len(location_metadata.languages)} languages")
+                # Check for 'languages' in the dict
+                if 'languages' in metadata_dict:
+                    logger.info(f"      ✓ Found 'languages' key!")
+                    languages = metadata_dict['languages']
+                    logger.info(f"      Number of languages: {len(languages) if isinstance(languages, dict) else 'N/A'}")
 
+                    if isinstance(languages, dict) and languages:
                         # Show first language
-                        first_lang = list(location_metadata.languages.keys())[0]
-                        lang_metadata = location_metadata.languages[first_lang]
+                        first_lang = list(languages.keys())[0]
+                        lang_data = languages[first_lang]
                         logger.info(f"      First language: {first_lang}")
+                        logger.info(f"      Language data type: {type(lang_data)}")
+                        logger.info(f"      Language data keys: {list(lang_data.keys())[:10] if isinstance(lang_data, dict) else 'N/A'}")
 
-                        if lang_metadata.models:
-                            logger.info(f"      Found {len(lang_metadata.models)} models for {first_lang}")
+                        # Check for models
+                        if isinstance(lang_data, dict) and 'models' in lang_data:
+                            models = lang_data['models']
+                            logger.info(f"      ✓ Found 'models' key!")
+                            logger.info(f"      Number of models: {len(models) if isinstance(models, dict) else 'N/A'}")
 
-                            # Show first model
-                            first_model = list(lang_metadata.models.keys())[0]
-                            model_metadata = lang_metadata.models[first_model]
-                            logger.info(f"      First model: {first_model}")
+                            if isinstance(models, dict) and models:
+                                # Show first model
+                                first_model = list(models.keys())[0]
+                                model_data = models[first_model]
+                                logger.info(f"      First model: {first_model}")
+                                logger.info(f"      Model data type: {type(model_data)}")
 
-                            # Show model features structure
-                            logger.info(f"      model_metadata type: {type(model_metadata)}")
-                            logger.info(f"      model_metadata attributes: {[attr for attr in dir(model_metadata) if not attr.startswith('_')][:15]}")
-
-                            if hasattr(model_metadata, 'model_features'):
-                                logger.info(f"      ✓ model_metadata.model_features exists")
-                                logger.info(f"      type: {type(model_metadata.model_features)}")
-                                logger.info(f"      Sample: {str(model_metadata.model_features)[:300]}")
-                    else:
-                        logger.info(f"      No languages found in metadata")
+                                if isinstance(model_data, dict):
+                                    logger.info(f"      Model keys: {list(model_data.keys())}")
+                                    logger.info(f"      Full model data sample:")
+                                    logger.info(f"      {json.dumps(model_data, indent=8, default=str)[:500]}")
                 else:
-                    logger.info(f"      metadata does not contain LocationsMetadata")
+                    logger.info(f"      No 'languages' key found")
+                    logger.info(f"      Available keys: {list(metadata_dict.keys())}")
 
             except Exception as e:
                 logger.error(f"      ✗ Unpacking failed: {type(e).__name__}: {e}")
