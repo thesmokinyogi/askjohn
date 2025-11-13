@@ -434,9 +434,14 @@
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <h1 style="margin: 0;">🎙️ Voice-to-Text</h1>
-            <a href="/jobs" style="font-size: 14px; color: #667eea; text-decoration: none; font-weight: 600;">
-                📋 View All Jobs
-            </a>
+            <div style="display: flex; gap: 15px;">
+                <a href="/jobs" style="font-size: 14px; color: #667eea; text-decoration: none; font-weight: 600;">
+                    📋 View All Jobs
+                </a>
+                <a href="/library" style="font-size: 14px; color: #667eea; text-decoration: none; font-weight: 600;">
+                    📚 Library
+                </a>
+            </div>
         </div>
         <p class="subtitle">75% cost savings with Dynamic Batch processing</p>
 
@@ -564,6 +569,8 @@
         let fileDurationMinutes = 0;
         let currentJobId = null; // Track current transcription job
         let pollingInterval = null; // For auto-polling
+        let pollCount = 0; // Track number of polls for intelligent messaging
+        let jobStartTime = null; // Track when job started
 
         // DOM elements
         const uploadArea = document.getElementById('uploadArea');
@@ -641,7 +648,7 @@
 
                 const div = document.createElement('div');
                 div.className = 'model-option' + (index === 0 ? ' selected' : '');
-                div.onclick = () => selectModel(modelKey);
+                div.onclick = function() { selectModel(modelKey, this); };
 
                 const badges = [];
                 if (index === 0) badges.push('<div class="model-badge badge-default">Default</div>');
@@ -669,10 +676,10 @@
         }
 
         // Select model
-        function selectModel(modelKey) {
+        function selectModel(modelKey, clickedElement) {
             selectedModel = modelKey;
             document.querySelectorAll('.model-option').forEach(el => el.classList.remove('selected'));
-            event.currentTarget.classList.add('selected');
+            clickedElement.classList.add('selected');
 
             // Update model indicator
             updateModelIndicator();
@@ -932,13 +939,35 @@
 
         // Start polling for job completion
         function startPolling() {
+            pollCount = 0;
+            jobStartTime = Date.now();
+
             // Check immediately
             checkJobStatus();
 
-            // Then check every 5 seconds
+            // Adaptive polling: Start at 3s, increase to 5s, then 8s for long jobs
+            let interval = 3000;
             pollingInterval = setInterval(() => {
+                pollCount++;
                 checkJobStatus();
-            }, 5000); // 5 seconds
+
+                // Adaptive interval adjustment
+                if (pollCount === 5 && interval === 3000) {
+                    clearInterval(pollingInterval);
+                    interval = 5000;
+                    pollingInterval = setInterval(() => {
+                        pollCount++;
+                        checkJobStatus();
+                    }, interval);
+                } else if (pollCount === 15 && interval === 5000) {
+                    clearInterval(pollingInterval);
+                    interval = 8000;
+                    pollingInterval = setInterval(() => {
+                        pollCount++;
+                        checkJobStatus();
+                    }, interval);
+                }
+            }, interval);
         }
 
         // Check job status
@@ -976,26 +1005,72 @@
             }
         }
 
-        // Update job status message
+        // Update job status message with intelligent context
         function updateJobStatusMessage(data) {
             const jobMessage = document.getElementById('jobMessage');
 
-            if (data.status === 'processing') {
+            if (data.status === 'queued') {
                 jobMessage.innerHTML = `
-                    <strong>Status:</strong> 🔄 Processing<br>
+                    <strong>Status:</strong> ⏳ Queued<br>
                     <strong>File:</strong> ${data.filename}<br>
                     <strong>Model:</strong> ${data.model}<br>
                     <br>
-                    <em>Transcription in progress... Checking every 5 seconds.</em><br>
-                    <em style="font-size: 12px; color: #666;">
-                        ${data.model.includes('batch') ? 'Batch jobs can take a few minutes. Please be patient!' : 'Should complete soon!'}
-                    </em>
+                    <em>Your job is in Google's queue. Processing will begin shortly...</em>
+                `;
+            } else if (data.status === 'processing') {
+                const elapsed = jobStartTime ? Math.round((Date.now() - jobStartTime) / 1000) : 0;
+                const elapsedMsg = elapsed > 0 ? `${elapsed}s elapsed` : '';
+
+                // Estimate remaining time based on file duration and model
+                const estimatedTime = getEstimatedProcessingTime(fileDurationMinutes, data.model);
+                const progressMsg = getProgressMessage(elapsed, estimatedTime, data.model);
+
+                jobMessage.innerHTML = `
+                    <strong>Status:</strong> 🔄 Processing<br>
+                    <strong>File:</strong> ${data.filename} (${fileDurationMinutes.toFixed(1)} min)<br>
+                    <strong>Model:</strong> ${data.model}<br>
+                    <br>
+                    <em>${progressMsg}</em><br>
+                    ${elapsedMsg ? `<em style="font-size: 12px; color: #666;">${elapsedMsg}</em>` : ''}
                 `;
             } else if (data.status === 'complete') {
+                const elapsed = jobStartTime ? Math.round((Date.now() - jobStartTime) / 1000) : 0;
                 jobMessage.innerHTML = `
-                    <strong>Status:</strong> ✓ Complete!<br>
+                    <strong>Status:</strong> ✓ Complete! ${elapsed > 0 ? `(${elapsed}s)` : ''}<br>
                     <em>Displaying results below...</em>
                 `;
+            }
+        }
+
+        // Estimate processing time based on audio duration and model
+        function getEstimatedProcessingTime(durationMinutes, model) {
+            // Rough estimates:
+            // Batch models: ~30-60s base + 5s per minute of audio
+            // Standard models: ~15-30s base + 3s per minute of audio
+            if (model.includes('batch')) {
+                return 45 + (durationMinutes * 5);
+            } else {
+                return 22 + (durationMinutes * 3);
+            }
+        }
+
+        // Generate intelligent progress message
+        function getProgressMessage(elapsedSeconds, estimatedSeconds, model) {
+            if (elapsedSeconds === 0) {
+                return `Google is transcribing your audio. Expected time: ~${Math.round(estimatedSeconds)}s`;
+            }
+
+            const remaining = Math.max(0, estimatedSeconds - elapsedSeconds);
+            const percentComplete = Math.min(95, Math.round((elapsedSeconds / estimatedSeconds) * 100));
+
+            if (elapsedSeconds < 10) {
+                return `Starting transcription... (~${Math.round(estimatedSeconds)}s estimated)`;
+            } else if (remaining > 10) {
+                return `Processing (${percentComplete}% estimated)... ~${Math.round(remaining)}s remaining`;
+            } else if (remaining > 0) {
+                return `Almost done! Should complete any moment...`;
+            } else {
+                return `Finalizing results... (taking longer than expected, but still processing)`;
             }
         }
 

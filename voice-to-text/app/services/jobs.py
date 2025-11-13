@@ -254,7 +254,8 @@ class JobStorageService:
         filename: str,
         model: str,
         duration_minutes: float = 0,
-        estimated_cost: float = 0
+        estimated_cost: float = 0,
+        gcs_uri: str = None
     ) -> Dict[str, Any]:
         """
         Create a new job record.
@@ -265,6 +266,7 @@ class JobStorageService:
             model: Model used (e.g., 'chirp_batch', 'long_standard')
             duration_minutes: Audio duration in minutes
             estimated_cost: Estimated transcription cost
+            gcs_uri: GCS URI of audio file (needed for GCS result lookup)
 
         Returns:
             The created job record
@@ -276,6 +278,7 @@ class JobStorageService:
             "model": model,
             "duration_minutes": duration_minutes,
             "estimated_cost": estimated_cost,
+            "gcs_uri": gcs_uri,  # Store for GCS result lookup
             "status": "queued",  # Initial state
             "submitted_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
@@ -419,6 +422,36 @@ class JobStorageService:
             "error": error,
             "completed_at": datetime.now().isoformat()
         })
+
+    def delete_job(self, job_id: str):
+        """
+        Delete a job and its associated transcript file.
+
+        Args:
+            job_id: Google operation name
+
+        Raises:
+            KeyError: If job not found
+        """
+        if job_id not in self.jobs:
+            raise KeyError(f"Job not found: {job_id}")
+
+        job = self.jobs[job_id]
+
+        # Delete transcript file if it exists
+        if "transcript_file" in job:
+            transcript_path = self.data_dir / job["transcript_file"]
+            if transcript_path.exists():
+                transcript_path.unlink()
+                logger.info(f"Deleted transcript file: {job['transcript_file']}")
+
+        # Remove from jobs dictionary
+        del self.jobs[job_id]
+
+        # Save updated jobs
+        self._save_jobs()
+
+        logger.info(f"Deleted job: {job_id}")
 
     def list_jobs(
         self,

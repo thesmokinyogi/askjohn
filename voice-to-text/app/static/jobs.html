@@ -292,7 +292,10 @@
     <div class="container">
         <div class="header">
             <h1>📋 Transcription Jobs</h1>
-            <a href="/" class="btn-link">← Back to Upload</a>
+            <div style="display: flex; gap: 10px;">
+                <a href="/" class="btn-link">← Back to Upload</a>
+                <a href="/library" class="btn-link">📚 Library</a>
+            </div>
         </div>
 
         <!-- Stats -->
@@ -317,12 +320,13 @@
 
         <!-- Filters -->
         <div class="filters">
-            <button class="filter-btn active" onclick="filterJobs('all')">All</button>
-            <button class="filter-btn" onclick="filterJobs('complete')">Complete</button>
-            <button class="filter-btn" onclick="filterJobs('processing')">Processing</button>
-            <button class="filter-btn" onclick="filterJobs('queued')">Queued</button>
-            <button class="filter-btn" onclick="filterJobs('failed')">Failed</button>
+            <button class="filter-btn active" onclick="filterJobs('all', this)">All</button>
+            <button class="filter-btn" onclick="filterJobs('complete', this)">Complete</button>
+            <button class="filter-btn" onclick="filterJobs('processing', this)">Processing</button>
+            <button class="filter-btn" onclick="filterJobs('queued', this)">Queued</button>
+            <button class="filter-btn" onclick="filterJobs('failed', this)">Failed</button>
             <button class="filter-btn" onclick="loadJobs()" style="margin-left: auto;">🔄 Refresh</button>
+            <button class="filter-btn" onclick="clearCompleted()" style="background: #dc3545; color: white;">🗑️ Clear Completed</button>
         </div>
 
         <!-- Loading -->
@@ -396,14 +400,14 @@
         }
 
         // Filter jobs
-        function filterJobs(status) {
+        function filterJobs(status, clickedButton) {
             currentFilter = status;
 
             // Update active filter button
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
-            event.currentTarget.classList.add('active');
+            clickedButton.classList.add('active');
 
             // Re-render jobs
             renderJobs();
@@ -458,7 +462,7 @@
                             </div>
                         </div>
                         <div class="status-badge ${statusClass}">
-                            ${job.status}
+                            ${job.status}${job.in_library ? ' • 📚 In Library' : ''}
                         </div>
                     </div>
 
@@ -495,15 +499,33 @@
                     </div>
                     ` : ''}
 
+                    <!-- Status message area for live updates -->
+                    <div id="status-msg-${shortId}" class="status-message" style="display: none; margin-top: 12px; padding: 10px; background: #f0f8ff; border-left: 3px solid #4CAF50; font-size: 13px;"></div>
+
                     <div class="job-actions">
                         ${job.transcript ? `
-                        <button class="btn-small" onclick="toggleTranscript('${shortId}')">
+                        <button class="btn-small" onclick="toggleTranscript('${shortId}', this)">
                             📄 View Transcript
                         </button>
                         ` : ''}
+                        ${job.in_library && job.library_id ? `
+                        <a href="/library" class="btn-small" style="text-decoration: none; display: inline-block;">
+                            📚 View in Library
+                        </a>
+                        ` : ''}
                         ${job.status === 'processing' || job.status === 'queued' ? `
-                        <button class="btn-small" onclick="checkStatus('${job.job_id}')">
+                        <button class="btn-small" id="check-btn-${shortId}" onclick="checkStatus('${job.job_id}', '${shortId}')">
                             🔄 Check Status
+                        </button>
+                        ` : ''}
+                        ${job.status === 'complete' && job.in_library ? `
+                        <button class="btn-small" onclick="removeFromJobs('${job.job_id}')" style="background: #f59e0b; color: white;">
+                            ✕ Remove from Jobs
+                        </button>
+                        ` : ''}
+                        ${job.status === 'failed' ? `
+                        <button class="btn-small" onclick="dismissJob('${job.job_id}')" style="background: #6b7280; color: white;">
+                            ✕ Dismiss
                         </button>
                         ` : ''}
                     </div>
@@ -512,22 +534,30 @@
         }
 
         // Toggle transcript visibility
-        function toggleTranscript(shortId) {
+        function toggleTranscript(shortId, clickedButton) {
             const transcriptEl = document.getElementById(`transcript-${shortId}`);
             transcriptEl.classList.toggle('active');
 
             // Update button text
-            const btn = event.currentTarget;
             if (transcriptEl.classList.contains('active')) {
-                btn.textContent = '▲ Hide Transcript';
+                clickedButton.textContent = '▲ Hide Transcript';
             } else {
-                btn.textContent = '📄 View Transcript';
+                clickedButton.textContent = '📄 View Transcript';
             }
         }
 
-        // Check status for a specific job
-        async function checkStatus(jobId) {
+        // Check status for a specific job with intelligent feedback
+        async function checkStatus(jobId, shortId) {
+            const statusMsg = document.getElementById(`status-msg-${shortId}`);
+            const checkBtn = document.getElementById(`check-btn-${shortId}`);
+
             try {
+                // Show checking message
+                statusMsg.style.display = 'block';
+                statusMsg.innerHTML = '🔄 Checking status with Google...';
+                checkBtn.disabled = true;
+                checkBtn.textContent = '⏳ Checking...';
+
                 const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/status`);
                 const data = await response.json();
 
@@ -535,20 +565,192 @@
                     throw new Error(data.detail || 'Status check failed');
                 }
 
-                // If status changed, reload all jobs
-                if (data.status === 'complete' || data.status === 'failed') {
-                    await loadJobs();
-                } else {
-                    // Just show a message
-                    alert(`Status: ${data.status}\n${data.message || ''}`);
+                // Show intelligent status message
+                if (data.status === 'complete') {
+                    statusMsg.innerHTML = '✅ <strong>Complete!</strong> Transcript ready. Refreshing...';
+                    statusMsg.style.borderColor = '#4CAF50';
+                    setTimeout(() => loadJobs(), 1000);
+                } else if (data.status === 'failed') {
+                    statusMsg.innerHTML = `❌ <strong>Failed:</strong> ${data.error || 'Unknown error'}. Refreshing...`;
+                    statusMsg.style.borderColor = '#dc3545';
+                    setTimeout(() => loadJobs(), 1500);
+                } else if (data.status === 'processing') {
+                    const job = allJobs.find(j => j.job_id === jobId);
+                    const duration = job ? job.duration_minutes : 0;
+                    const model = job ? job.model : '';
+                    const estimatedTime = getEstimatedTime(duration, model);
+                    statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${estimatedTime}s. Check back in a minute.</em>`;
+                    statusMsg.style.borderColor = '#2196F3';
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = '🔄 Check Again';
+                } else if (data.status === 'queued') {
+                    statusMsg.innerHTML = '⏳ <strong>Queued:</strong> Waiting in Google\'s queue. Processing will start soon.';
+                    statusMsg.style.borderColor = '#FF9800';
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = '🔄 Check Again';
                 }
 
             } catch (err) {
-                alert(`Error checking status: ${err.message}`);
+                statusMsg.innerHTML = `⚠️ <strong>Error:</strong> ${err.message}`;
+                statusMsg.style.borderColor = '#dc3545';
+                checkBtn.disabled = false;
+                checkBtn.textContent = '🔄 Retry';
             }
         }
 
-        // Auto-refresh every 10 seconds
+        // Estimate processing time (same logic as index.html)
+        function getEstimatedTime(durationMinutes, model) {
+            if (model.includes('batch')) {
+                return 45 + (durationMinutes * 5);
+            } else {
+                return 22 + (durationMinutes * 3);
+            }
+        }
+
+        // Remove from jobs (but keep in library)
+        async function removeFromJobs(jobId) {
+            const shortId = jobId.split('/').pop();
+            if (!confirm(`Remove job ${shortId} from jobs list? (Transcript will remain in Library)`)) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Remove failed');
+                }
+
+                // Show success toast
+                showToast('Removed from Jobs - Available in Library');
+
+                // Reload jobs list
+                await loadJobs();
+
+            } catch (err) {
+                alert(`Error removing job: ${err.message}`);
+            }
+        }
+
+        // Dismiss a failed job
+        async function dismissJob(jobId) {
+            const shortId = jobId.split('/').pop();
+            if (!confirm(`Dismiss failed job ${shortId}?`)) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Dismiss failed');
+                }
+
+                // Show success toast
+                showToast('Failed job dismissed');
+
+                // Reload jobs list
+                await loadJobs();
+
+            } catch (err) {
+                alert(`Error dismissing job: ${err.message}`);
+            }
+        }
+
+        // Delete a single job (legacy - kept for compatibility)
+        async function deleteJob(jobId) {
+            const shortId = jobId.split('/').pop();
+            if (!confirm(`Delete job ${shortId}?`)) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Delete failed');
+                }
+
+                // Reload jobs list
+                await loadJobs();
+
+            } catch (err) {
+                alert(`Error deleting job: ${err.message}`);
+            }
+        }
+
+        // Show toast notification
+        function showToast(message) {
+            // Create toast if it doesn't exist
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.style.cssText = `
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    background: #333;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    z-index: 1000;
+                    display: none;
+                    animation: slideIn 0.3s ease;
+                `;
+                document.body.appendChild(toast);
+
+                // Add animation
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes slideIn {
+                        from { transform: translateX(400px); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            toast.textContent = message;
+            toast.style.display = 'block';
+
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        // Clear all completed jobs
+        async function clearCompleted() {
+            const completedJobs = allJobs.filter(j => j.status === 'complete');
+
+            if (completedJobs.length === 0) {
+                alert('No completed jobs to clear.');
+                return;
+            }
+
+            if (!confirm(`Delete ${completedJobs.length} completed job(s)?`)) return;
+
+            try {
+                // Delete each completed job
+                const deletePromises = completedJobs.map(job =>
+                    fetch(`/api/jobs/${encodeURIComponent(job.job_id)}`, { method: 'DELETE' })
+                );
+
+                await Promise.all(deletePromises);
+
+                // Reload jobs list
+                await loadJobs();
+
+            } catch (err) {
+                alert(`Error clearing jobs: ${err.message}`);
+            }
+        }
+
+        // Auto-refresh every 60 seconds
         function startAutoRefresh() {
             autoRefreshInterval = setInterval(() => {
                 // Only refresh if there are processing/queued jobs
@@ -559,7 +761,7 @@
                 if (hasActiveJobs) {
                     loadJobs();
                 }
-            }, 10000); // 10 seconds
+            }, 60000); // 60 seconds
         }
 
         // Show error
