@@ -135,26 +135,37 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             logger.debug(f"No metadata for location {location_id}, skipping")
             continue
 
-        # Location objects are raw protobuf (locations_pb2), not proto-plus
-        # Use MessageToDict for conversion
+        # Location.metadata is a protobuf Any - need to unpack it first
         try:
-            # OBSERVATION: What type is this object?
-            logger.info(f"🔍 {location_id}: type(loc) = {type(loc)}")
-            logger.info(f"🔍 {location_id}: type(loc).__name__ = {type(loc).__name__}")
+            # OBSERVATION: What's in loc.metadata?
+            logger.info(f"🔍 {location_id}: type(loc.metadata) = {type(loc.metadata)}")
+            logger.info(f"🔍 {location_id}: loc.metadata.type_url = {loc.metadata.type_url}")
 
-            # OBSERVATION: Convert to dict using MessageToDict
-            logger.info(f"🔍 {location_id}: Attempting MessageToDict(loc)...")
-            location_dict = MessageToDict(loc)
-            logger.info(f"🔍 {location_id}: ✓ MessageToDict succeeded! Keys: {list(location_dict.keys())}")
+            # OBSERVATION: Try unpacking to Struct (generic JSON representation)
+            logger.info(f"🔍 {location_id}: Attempting to unpack Any to Struct...")
+            from google.protobuf import struct_pb2
+            metadata_struct = struct_pb2.Struct()
 
-            # OBSERVATION: What's in metadata?
-            metadata_dict = location_dict.get('metadata', {})
-            logger.info(f"🔍 {location_id}: type(metadata_dict) = {type(metadata_dict)}")
-            logger.info(f"🔍 {location_id}: metadata_dict is empty? {not metadata_dict}")
+            # Unpack the Any message to Struct
+            if loc.metadata.Unpack(metadata_struct):
+                logger.info(f"🔍 {location_id}: ✓ Unpacked to Struct successfully!")
 
-            if metadata_dict:
-                logger.info(f"🔍 {location_id}: isinstance(metadata_dict, dict) = {isinstance(metadata_dict, dict)}")
-                logger.info(f"🔍 {location_id}: metadata_dict.keys() = {list(metadata_dict.keys())[:10]}")
+                # Convert Struct to Python dict
+                metadata_dict = MessageToDict(metadata_struct)
+                logger.info(f"🔍 {location_id}: ✓ Converted Struct to dict! Keys: {list(metadata_dict.keys())[:10]}")
+            else:
+                logger.warning(f"🔍 {location_id}: ✗ Failed to unpack Any to Struct")
+
+                # Alternative: Try accessing the value field directly
+                logger.info(f"🔍 {location_id}: Trying direct field access on Any.value...")
+                logger.info(f"🔍 {location_id}: Any.value length = {len(loc.metadata.value)} bytes")
+
+                # Try decoding the serialized bytes
+                from google.cloud.speech_v2.types import cloud_speech
+                logger.info(f"🔍 {location_id}: Checking available Speech V2 types...")
+                logger.info(f"🔍 {location_id}: dir(cloud_speech)[:20] = {[x for x in dir(cloud_speech) if not x.startswith('_')][:20]}")
+
+                metadata_dict = {}
 
             if not metadata_dict:
                 logger.warning(f"No metadata found in {location_id}, skipping")
