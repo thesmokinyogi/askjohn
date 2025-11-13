@@ -10,6 +10,7 @@ import json
 import logging
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.location import locations_pb2
+from google.protobuf.json_format import MessageToDict
 
 # Configure logging
 logging.basicConfig(
@@ -166,8 +167,24 @@ def observe_metadata_discovery():
             # Try alternative approaches
             logger.info(f"\n   TRYING ALTERNATIVES:")
 
-            # Alternative 1: Direct attribute access
-            logger.info(f"\n   A. Direct attribute access:")
+            # Alternative 1: MessageToDict (for raw protobuf)
+            logger.info(f"\n   A. MessageToDict(loc):")
+            try:
+                location_dict = MessageToDict(loc)
+                logger.info(f"      ✓ MessageToDict succeeded!")
+                logger.info(f"      Keys: {list(location_dict.keys())}")
+
+                metadata_dict = location_dict.get('metadata', {})
+                logger.info(f"      metadata keys: {list(metadata_dict.keys())[:10] if metadata_dict else 'None'}")
+
+                if 'languages' in metadata_dict:
+                    logger.info(f"      Found 'languages' in metadata!")
+                    logger.info(f"      Sample: {str(metadata_dict['languages'])[:300]}")
+            except Exception as e:
+                logger.error(f"      ✗ MessageToDict failed: {e}")
+
+            # Alternative 2: Direct attribute access
+            logger.info(f"\n   B. Direct attribute access:")
             try:
                 logger.info(f"      loc.location_id = {loc.location_id}")
                 logger.info(f"      loc.name = {loc.name}")
