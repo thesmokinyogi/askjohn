@@ -31,6 +31,26 @@ except ImportError as e:
     CONFIG_AVAILABLE = False
     CONFIG_IMPORT_ERROR = str(e)
 
+# Try Gemini's second suggestion: internal cloud_speech_pb2 import
+STT_PROTO_AVAILABLE = False
+STT_PROTO_IMPORT_ERROR = None
+STT_PROTO_METHOD = None
+
+# Try method 1: from google.cloud.speech_v2.proto import cloud_speech_pb2
+try:
+    from google.cloud.speech_v2.proto import cloud_speech_pb2 as stt_proto
+    STT_PROTO_AVAILABLE = True
+    STT_PROTO_METHOD = "from google.cloud.speech_v2.proto import cloud_speech_pb2"
+except ImportError as e1:
+    # Try method 2: import google.cloud.speech_v2.proto.cloud_speech_pb2
+    try:
+        import google.cloud.speech_v2.proto.cloud_speech_pb2 as stt_proto
+        STT_PROTO_AVAILABLE = True
+        STT_PROTO_METHOD = "import google.cloud.speech_v2.proto.cloud_speech_pb2"
+    except ImportError as e2:
+        STT_PROTO_AVAILABLE = False
+        STT_PROTO_IMPORT_ERROR = f"Method 1: {e1}\nMethod 2: {e2}"
+
 # Load environment variables from .env file (same as server does)
 load_dotenv()
 
@@ -435,6 +455,89 @@ def observe_metadata_discovery():
 
                 except Exception as e:
                     logger.error(f"      ✗ get_config() approach failed: {type(e).__name__}: {e}")
+                    import traceback
+                    logger.error(f"      {traceback.format_exc()}")
+
+            # Alternative 6: Gemini's second recommendation - internal cloud_speech_pb2 import
+            logger.info(f"\n   F. Import cloud_speech_pb2 directly (Gemini's refined solution):")
+
+            if not STT_PROTO_AVAILABLE:
+                logger.error(f"      ✗ cloud_speech_pb2 not available via either method")
+                logger.error(f"      Import errors:\n{STT_PROTO_IMPORT_ERROR}")
+            else:
+                logger.info(f"      ✓ cloud_speech_pb2 imported successfully!")
+                logger.info(f"      Method: {STT_PROTO_METHOD}")
+
+                try:
+                    # Access LocationsMetadata from the imported module
+                    LocationsMetadataFromProto = stt_proto.LocationsMetadata
+                    logger.info(f"      ✓ stt_proto.LocationsMetadata accessible")
+                    logger.info(f"      type = {type(LocationsMetadataFromProto)}")
+
+                    # Check if metadata contains this type
+                    if loc.metadata.Is(LocationsMetadataFromProto.DESCRIPTOR):
+                        logger.info(f"      ✓ metadata.Is(LocationsMetadata.DESCRIPTOR) = True")
+
+                        # Unpack the Any object
+                        location_metadata = LocationsMetadataFromProto()
+                        loc.metadata.Unpack(location_metadata)
+                        logger.info(f"      ✓ Unpacked successfully!")
+
+                        # Check languages
+                        if location_metadata.languages:
+                            logger.info(f"      ✓ Found {len(location_metadata.languages)} languages")
+
+                            # Show first few language codes
+                            lang_codes = list(location_metadata.languages.keys())[:5]
+                            logger.info(f"      First 5 languages: {lang_codes}")
+
+                            # Examine first language in detail
+                            first_lang = list(location_metadata.languages.keys())[0]
+                            lang_metadata = location_metadata.languages[first_lang]
+                            logger.info(f"\n      Examining language: {first_lang}")
+                            logger.info(f"      type(lang_metadata) = {type(lang_metadata)}")
+
+                            if lang_metadata.models:
+                                logger.info(f"      ✓ Found {len(lang_metadata.models)} models")
+                                model_ids = list(lang_metadata.models.keys())[:5]
+                                logger.info(f"      First 5 models: {model_ids}")
+
+                                # Examine first model
+                                first_model = list(lang_metadata.models.keys())[0]
+                                model_metadata = lang_metadata.models[first_model]
+                                logger.info(f"\n      Examining model: {first_model}")
+
+                                # Check for model_features
+                                if hasattr(model_metadata, 'model_features'):
+                                    logger.info(f"      ✓ model_metadata.model_features exists")
+
+                                    if first_model in model_metadata.model_features:
+                                        features_obj = model_metadata.model_features[first_model]
+                                        logger.info(f"      Features object found for {first_model}")
+
+                                        if hasattr(features_obj, 'model_feature'):
+                                            logger.info(f"      ✓ features_obj.model_feature exists")
+                                            logger.info(f"      Number of features: {len(features_obj.model_feature)}")
+
+                                            # Show features
+                                            logger.info(f"\n      Features for {first_model} in {first_lang}:")
+                                            for i, feature in enumerate(features_obj.model_feature[:10]):
+                                                logger.info(f"         {i+1}. {feature.feature} ({feature.release_state})")
+                                        else:
+                                            logger.warning(f"      features_obj has no 'model_feature' attribute")
+                                    else:
+                                        logger.warning(f"      {first_model} not found in model_features map")
+                                else:
+                                    logger.warning(f"      model_metadata has no 'model_features' attribute")
+                            else:
+                                logger.warning(f"      lang_metadata has no models")
+                        else:
+                            logger.warning(f"      location_metadata has no languages")
+                    else:
+                        logger.warning(f"      metadata does not contain LocationsMetadata type")
+
+                except Exception as e:
+                    logger.error(f"      ✗ cloud_speech_pb2 approach failed: {type(e).__name__}: {e}")
                     import traceback
                     logger.error(f"      {traceback.format_exc()}")
 
