@@ -603,69 +603,94 @@ def observe_metadata_discovery():
                         # Check for languages
                         if isinstance(metadata, dict) and 'languages' in metadata:
                             logger.info(f"\n         ✓✓✓ SUCCESS! 'languages' found in metadata!")
-                            languages = metadata['languages']
-                            logger.info(f"         Number of languages: {len(languages)}")
+                            languages_obj = metadata['languages']
+                            logger.info(f"         languages type: {type(languages_obj)}")
+                            logger.info(f"         languages keys: {list(languages_obj.keys()) if isinstance(languages_obj, dict) else 'N/A'}")
 
-                            # Show first few language codes
-                            lang_codes = list(languages.keys())[:5]
-                            logger.info(f"         First 5 language codes: {lang_codes}")
+                            # ACTUAL STRUCTURE: metadata.languages.models[lang_code]
+                            if isinstance(languages_obj, dict) and 'models' in languages_obj:
+                                models_by_lang = languages_obj['models']
+                                logger.info(f"\n         ✓✓✓ Found 'models' container!")
+                                logger.info(f"         Number of language codes: {len(models_by_lang)}")
 
-                            # Examine first language
-                            if languages:
-                                first_lang = list(languages.keys())[0]
-                                lang_data = languages[first_lang]
-                                logger.info(f"\n         Examining language: {first_lang}")
-                                logger.info(f"         Language data keys: {list(lang_data.keys()) if isinstance(lang_data, dict) else 'N/A'}")
+                                # Show language codes
+                                lang_codes = list(models_by_lang.keys())[:10]
+                                logger.info(f"         First 10 language codes: {lang_codes}")
 
-                                # Check for models
-                                if isinstance(lang_data, dict) and 'models' in lang_data:
-                                    models = lang_data['models']
-                                    logger.info(f"\n         ✓ 'models' found!")
-                                    logger.info(f"         Number of models: {len(models)}")
+                                # Examine first language
+                                if models_by_lang:
+                                    first_lang = list(models_by_lang.keys())[0]
+                                    lang_models = models_by_lang[first_lang]
+                                    logger.info(f"\n         Examining language: {first_lang}")
+                                    logger.info(f"         type(lang_models) = {type(lang_models)}")
 
-                                    model_ids = list(models.keys())[:5]
-                                    logger.info(f"         First 5 model IDs: {model_ids}")
+                                    if isinstance(lang_models, dict):
+                                        logger.info(f"         Top-level keys for {first_lang}: {list(lang_models.keys())}")
 
-                                    # Examine first model
-                                    if models:
-                                        first_model = list(models.keys())[0]
-                                        model_data = models[first_model]
-                                        logger.info(f"\n         Examining model: {first_model}")
-                                        logger.info(f"         Model data keys: {list(model_data.keys()) if isinstance(model_data, dict) else 'N/A'}")
+                                        # Check if 'modelFeatures' is a top-level key
+                                        if 'modelFeatures' in lang_models:
+                                            model_features_container = lang_models['modelFeatures']
+                                            logger.info(f"\n         ✓✓✓ Found 'modelFeatures' container!")
+                                            logger.info(f"         type = {type(model_features_container)}")
 
-                                        # Check for modelFeatures (camelCase in JSON)
-                                        if isinstance(model_data, dict) and 'modelFeatures' in model_data:
-                                            model_features = model_data['modelFeatures']
-                                            logger.info(f"\n         ✓✓✓ 'modelFeatures' found!")
-                                            logger.info(f"         Keys in modelFeatures: {list(model_features.keys())[:5] if isinstance(model_features, dict) else 'N/A'}")
+                                            if isinstance(model_features_container, dict):
+                                                model_ids = list(model_features_container.keys())
+                                                logger.info(f"         Model IDs inside modelFeatures: {model_ids}")
 
-                                            # Check if model ID is in modelFeatures map
-                                            if isinstance(model_features, dict) and first_model in model_features:
-                                                features_obj = model_features[first_model]
-                                                logger.info(f"         Features object found for {first_model}")
-                                                logger.info(f"         Features object type: {type(features_obj)}")
-                                                logger.info(f"         Features object keys: {list(features_obj.keys()) if isinstance(features_obj, dict) else 'N/A'}")
+                                                # Explore each model ID
+                                                for model_id in model_ids[:3]:  # First 3 models
+                                                    model_data = model_features_container[model_id]
+                                                    logger.info(f"\n         Examining model: {model_id}")
+                                                    logger.info(f"         type = {type(model_data)}")
 
-                                                # Check for modelFeature array (camelCase)
-                                                if isinstance(features_obj, dict) and 'modelFeature' in features_obj:
-                                                    feature_list = features_obj['modelFeature']
-                                                    logger.info(f"\n         ✓✓✓ JACKPOT! Found feature list!")
-                                                    logger.info(f"         Number of features: {len(feature_list)}")
+                                                    if isinstance(model_data, dict):
+                                                        logger.info(f"         Keys: {list(model_data.keys())}")
 
-                                                    # Show first few features
-                                                    logger.info(f"\n         Features for {first_model} in {first_lang}:")
-                                                    for i, feature in enumerate(feature_list[:10]):
-                                                        feature_name = feature.get('feature', 'unknown')
-                                                        release_state = feature.get('releaseState', 'unknown')
-                                                        logger.info(f"            {i+1}. {feature_name} ({release_state})")
-                                                else:
-                                                    logger.warning(f"         'modelFeature' not found in features object")
-                                            else:
-                                                logger.warning(f"         {first_model} not in modelFeatures map")
+                                                        # Check for 'modelFeature' (singular) array
+                                                        if 'modelFeature' in model_data:
+                                                            feature_list = model_data['modelFeature']
+                                                            logger.info(f"\n         ✓✓✓ JACKPOT! Found 'modelFeature' array!")
+                                                            logger.info(f"         Number of features: {len(feature_list)}")
+
+                                                            logger.info(f"\n         ALL Features for {model_id} in {first_lang}:")
+                                                            for i, feature in enumerate(feature_list):
+                                                                if isinstance(feature, dict):
+                                                                    feature_name = feature.get('feature', 'unknown')
+                                                                    release_state = feature.get('releaseState', 'unknown')
+                                                                    logger.info(f"            {i+1}. {feature_name} ({release_state})")
+                                                                else:
+                                                                    logger.info(f"            {i+1}. {feature}")
+
+                                                        # Also show full structure for debugging
+                                                        logger.info(f"\n         Full structure for {model_id}:")
+                                                        logger.info(f"         {json.dumps(model_data, indent=10, default=str)[:800]}")
+
+                                                # Test a few more languages to verify structure
+                                                logger.info(f"\n         Testing 2 more languages for consistency:")
+                                                for test_lang in list(models_by_lang.keys())[1:3]:
+                                                    test_lang_data = models_by_lang[test_lang]
+                                                    if isinstance(test_lang_data, dict) and 'modelFeatures' in test_lang_data:
+                                                        test_model_features = test_lang_data['modelFeatures']
+                                                        if isinstance(test_model_features, dict):
+                                                            test_model_ids = list(test_model_features.keys())[:3]
+                                                            logger.info(f"         {test_lang} → modelFeatures → {test_model_ids}")
                                         else:
-                                            logger.warning(f"         'modelFeatures' not found in model data")
-                                else:
-                                    logger.warning(f"         'models' not found in language data")
+                                            # Old logic: maybe model IDs are direct keys
+                                            logger.info(f"         'modelFeatures' not found as top-level key")
+                                            logger.info(f"         Available keys: {list(lang_models.keys())[:10]}")
+
+                                            # Examine first key anyway
+                                            if lang_models:
+                                                first_key = list(lang_models.keys())[0]
+                                                first_value = lang_models[first_key]
+                                                logger.info(f"\n         Examining first key: {first_key}")
+                                                logger.info(f"         type = {type(first_value)}")
+                                                if isinstance(first_value, dict):
+                                                    logger.info(f"         Keys: {list(first_value.keys())[:10]}")
+                                                    logger.info(f"         Full structure: {json.dumps(first_value, indent=10, default=str)[:500]}")
+                            else:
+                                logger.warning(f"         Structure doesn't match expected pattern")
+                                logger.info(f"         Actual structure: {json.dumps(languages_obj, indent=2)[:500]}")
                         else:
                             logger.warning(f"         'languages' not found in metadata")
                             logger.info(f"         metadata content: {str(metadata)[:200]}")
