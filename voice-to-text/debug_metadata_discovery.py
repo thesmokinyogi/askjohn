@@ -9,6 +9,7 @@ import os
 import json
 import logging
 from google.cloud.speech_v2 import SpeechClient
+from google.cloud.speech_v2.types import LocationsMetadata
 from google.cloud.location import locations_pb2
 from google.protobuf.json_format import MessageToDict
 from dotenv import load_dotenv
@@ -196,6 +197,53 @@ def observe_metadata_discovery():
                 logger.info(f"      loc.metadata = {str(loc.metadata)[:200]}")
             except Exception as e:
                 logger.error(f"      Failed: {e}")
+
+            # Alternative 3: Unpack Any to LocationsMetadata (Gemini's solution)
+            logger.info(f"\n   C. Unpack Any to LocationsMetadata:")
+            try:
+                # Check if metadata contains LocationsMetadata
+                if loc.metadata.Is(LocationsMetadata.pb()):
+                    logger.info(f"      ✓ metadata.Is(LocationsMetadata) = True")
+
+                    # Unpack the Any object
+                    location_metadata = LocationsMetadata()
+                    loc.metadata.Unpack(location_metadata)
+                    logger.info(f"      ✓ Unpacked successfully!")
+
+                    # Check what's in languages
+                    if location_metadata.languages:
+                        logger.info(f"      ✓ Found {len(location_metadata.languages)} languages")
+
+                        # Show first language
+                        first_lang = list(location_metadata.languages.keys())[0]
+                        lang_metadata = location_metadata.languages[first_lang]
+                        logger.info(f"      First language: {first_lang}")
+
+                        if lang_metadata.models:
+                            logger.info(f"      Found {len(lang_metadata.models)} models for {first_lang}")
+
+                            # Show first model
+                            first_model = list(lang_metadata.models.keys())[0]
+                            model_metadata = lang_metadata.models[first_model]
+                            logger.info(f"      First model: {first_model}")
+
+                            # Show model features structure
+                            logger.info(f"      model_metadata type: {type(model_metadata)}")
+                            logger.info(f"      model_metadata attributes: {[attr for attr in dir(model_metadata) if not attr.startswith('_')][:15]}")
+
+                            if hasattr(model_metadata, 'model_features'):
+                                logger.info(f"      ✓ model_metadata.model_features exists")
+                                logger.info(f"      type: {type(model_metadata.model_features)}")
+                                logger.info(f"      Sample: {str(model_metadata.model_features)[:300]}")
+                    else:
+                        logger.info(f"      No languages found in metadata")
+                else:
+                    logger.info(f"      metadata does not contain LocationsMetadata")
+
+            except Exception as e:
+                logger.error(f"      ✗ Unpacking failed: {type(e).__name__}: {e}")
+                import traceback
+                logger.error(f"      {traceback.format_exc()}")
 
         logger.info("\n" + "=" * 80)
         logger.info("OBSERVATION COMPLETE")
