@@ -9,6 +9,7 @@ import os
 import json
 import logging
 from google.cloud.speech_v2 import SpeechClient
+from google.cloud.speech_v2.proto.cloud_speech_pb2 import LocationsMetadata
 from google.cloud.location import locations_pb2
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
@@ -245,6 +246,65 @@ def observe_metadata_discovery():
                 else:
                     logger.info(f"      No 'languages' key found")
                     logger.info(f"      Available keys: {list(metadata_dict.keys())}")
+
+            except Exception as e:
+                logger.error(f"      ✗ Unpacking failed: {type(e).__name__}: {e}")
+                import traceback
+                logger.error(f"      {traceback.format_exc()}")
+
+            # Alternative 4: Unpack Any to LocationsMetadata from internal proto (Gemini's corrected solution)
+            logger.info(f"\n   D. Unpack Any to LocationsMetadata (internal proto path):")
+            try:
+                # Check if metadata contains LocationsMetadata
+                if loc.metadata.Is(LocationsMetadata.DESCRIPTOR):
+                    logger.info(f"      ✓ metadata.Is(LocationsMetadata.DESCRIPTOR) = True")
+
+                    # Unpack the Any object
+                    location_metadata = LocationsMetadata()
+                    loc.metadata.Unpack(location_metadata)
+                    logger.info(f"      ✓ Unpacked successfully!")
+
+                    # Check what's in languages
+                    if location_metadata.languages:
+                        logger.info(f"      ✓ Found {len(location_metadata.languages)} languages")
+
+                        # Show first language
+                        first_lang = list(location_metadata.languages.keys())[0]
+                        lang_metadata = location_metadata.languages[first_lang]
+                        logger.info(f"      First language: {first_lang}")
+
+                        if lang_metadata.models:
+                            logger.info(f"      Found {len(lang_metadata.models)} models for {first_lang}")
+
+                            # Show first model
+                            first_model = list(lang_metadata.models.keys())[0]
+                            model_metadata = lang_metadata.models[first_model]
+                            logger.info(f"      First model: {first_model}")
+
+                            # Show model_features structure
+                            logger.info(f"      model_metadata attributes: {[attr for attr in dir(model_metadata) if not attr.startswith('_')][:15]}")
+
+                            if hasattr(model_metadata, 'model_features'):
+                                logger.info(f"      ✓ model_metadata.model_features exists")
+                                logger.info(f"      type: {type(model_metadata.model_features)}")
+
+                                # Show structure
+                                if first_model in model_metadata.model_features:
+                                    features_obj = model_metadata.model_features[first_model]
+                                    logger.info(f"      features_obj type: {type(features_obj)}")
+                                    logger.info(f"      features_obj attributes: {[attr for attr in dir(features_obj) if not attr.startswith('_')][:10]}")
+
+                                    if hasattr(features_obj, 'model_feature'):
+                                        logger.info(f"      ✓ features_obj.model_feature exists (list of features)")
+                                        logger.info(f"      Number of features: {len(features_obj.model_feature)}")
+
+                                        # Show first few features
+                                        for i, feature in enumerate(features_obj.model_feature[:5]):
+                                            logger.info(f"         Feature {i+1}: {feature.feature} ({feature.release_state})")
+                    else:
+                        logger.info(f"      No languages found in metadata")
+                else:
+                    logger.info(f"      metadata does not contain LocationsMetadata")
 
             except Exception as e:
                 logger.error(f"      ✗ Unpacking failed: {type(e).__name__}: {e}")
