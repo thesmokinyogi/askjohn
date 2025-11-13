@@ -11,6 +11,10 @@ import logging
 from google.cloud.speech_v2 import SpeechClient
 from google.cloud.location import locations_pb2
 from google.protobuf.json_format import MessageToDict
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (same as server does)
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
