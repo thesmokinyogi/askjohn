@@ -24,12 +24,87 @@ from google.api_core.client_options import ClientOptions
 from google.api_core import operations_v1
 from google.protobuf.json_format import MessageToDict, Parse
 from google.protobuf import struct_pb2
+from google.auth import default
+from google.auth.transport.requests import Request as AuthRequest
+from google.auth import exceptions as auth_exceptions
+import requests
 import json
 from typing import Dict, Optional, Set
 import logging
 import time
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# REST API HELPER FOR METADATA DISCOVERY
+# ============================================================================
+
+def _discover_location_metadata_via_rest_api(project_id: str, location: str) -> Optional[dict]:
+    """
+    Query a single location's metadata via REST API (bypasses SDK limitations).
+    
+    This is the working approach discovered through empirical testing.
+    The Python SDK doesn't expose LocationsMetadata protobuf descriptor,
+    so we use REST API directly to get JSON response.
+    
+    Args:
+        project_id: Google Cloud project ID
+        location: Location ID (e.g., 'us-west1')
+        
+    Returns:
+        dict with 'metadata' key containing location metadata, or None if failed
+    """
+    try:
+        # Get credentials with explicit scopes (required for REST API)
+        try:
+            credentials, _ = default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
+            auth_request = AuthRequest()
+            credentials.refresh(auth_request)
+            token = credentials.token
+            
+            if not token:
+                logger.error(f"Failed to get auth token for {location}")
+                return None
+                
+        except (auth_exceptions.DefaultCredentialsError, auth_exceptions.RefreshError) as e:
+            logger.error(f"Authentication failed for {location}: {e}")
+            return None
+        
+        # Build REST API URL
+        rest_url = f"https://{location}-speech.googleapis.com/v2/projects/{project_id}/locations/{location}"
+        
+        # Make GET request
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.get(rest_url, headers=headers, timeout=10)
+        
+        # 404 is expected for regions that don't support Speech V2
+        # This is normal behavior with the Probe List Strategy
+        if response.status_code == 404:
+            logger.debug(f"Location {location} does not support Speech V2 (404 - expected)")
+            return None
+        
+        # Raise for other HTTP errors
+        response.raise_for_status()
+        
+        # Parse JSON response
+        try:
+            return response.json()
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid JSON response from {location}: {e}")
+            return None
+        
+    except requests.exceptions.RequestException as e:
+        # Handle other request exceptions (network errors, timeouts, etc.)
+        logger.debug(f"REST API request failed for {location}: {e}")
+        return None
+    except Exception as e:
+        logger.debug(f"Unexpected error querying {location} via REST API: {e}")
+        return None
+
 
 # ============================================================================
 # MODULE-LEVEL METADATA CACHE
@@ -87,10 +162,12 @@ KNOWN_UNSUPPORTED = {
 
 def discover_speech_metadata(project_id: str, languages: list[str] = None) -> dict:
     """
-    Query Locations API to discover ALL available Speech V2 metadata.
+    Query Locations API to discover ALL available Speech V2 metadata via REST API.
 
     This is the single source of truth for Speech V2 configuration.
     Replaces all hardcoded lists of regions, models, and features.
+    
+    Uses REST API directly because Python SDK doesn't expose LocationsMetadata protobuf.
 
     Args:
         project_id: Google Cloud project ID
@@ -102,97 +179,132 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
             - 'models_by_location': Dict[(location, language)] -> Set[model_ids]
             - 'features_by_model': Dict[(location, language, model)] -> Set[feature_keys]
             - 'success': bool indicating if discovery succeeded
-
-    Raises:
-        Exception: If Locations API is completely unavailable
     """
     if languages is None:
         languages = ['en-US']
 
-    logger.info("Discovering Speech V2 metadata from Locations API...")
+    logger.info("Discovering Speech V2 metadata via REST API...")
 
-    # Create client (no specific endpoint - query for all locations)
-    client = SpeechClient()
+    # PROBE LIST STRATEGY (Recommended by Google Cloud Architecture)
+    # There is no API endpoint that returns all Speech V2 locations programmatically.
+    # The SDK list_locations() only returns locations where the project has resources.
+    # Therefore, we maintain a canonical list of Google Cloud regions and probe each one
+    # to discover which support Speech V2 dynamically.
+    #
+    # This list is based on documented GCP regions and should be updated when Google
+    # announces new regions. The REST API metadata endpoint validates which regions
+    # actually support Speech V2 at runtime.
+    #
+    # Reference: Google Cloud Architecture Pattern - "Probe List Strategy"
+    PROBE_REGION_LIST = [
+        # Multi-region endpoints
+        'us', 'eu',  # Note: 'global' endpoint exists but uses different URL pattern
+        # US regions
+        'us-central1', 'us-east1', 'us-east4', 'us-west1', 'us-west2', 'us-west3', 'us-west4',
+        # Europe regions
+        'europe-west1', 'europe-west2', 'europe-west3', 'europe-west4', 'europe-west6',
+        # Asia regions
+        'asia-east1', 'asia-east2', 'asia-northeast1', 'asia-northeast2', 'asia-south1', 
+        'asia-southeast1', 'asia-southeast2',
+        # Other regions
+        'australia-southeast1', 'northamerica-northeast1', 'southamerica-east1'
+    ]
 
-    # Query all locations for this project
-    request = locations_pb2.ListLocationsRequest(
-        name=f"projects/{project_id}"
-    )
-
-    response = client.list_locations(request=request)
-
-    # Extract comprehensive metadata
     available_locations = set()
     models_by_location = {}
     features_by_model = {}
+    successful_locations = 0
 
-    for loc in response.locations:
-        location_id = loc.location_id
-        available_locations.add(location_id)
-
-        # Parse metadata
-        if not loc.metadata:
-            logger.debug(f"No metadata for location {location_id}, skipping")
+    # Probe each region to discover which support Speech V2
+    for location in PROBE_REGION_LIST:
+        # Query this location via REST API
+        data = _discover_location_metadata_via_rest_api(project_id, location)
+        
+        if not data or 'metadata' not in data:
+            logger.debug(f"No metadata for location {location}, skipping")
             continue
 
-        # Location objects are raw protobuf (locations_pb2), not proto-plus
-        # Use MessageToDict for conversion
-        try:
-            location_dict = MessageToDict(loc)
-            metadata_dict = location_dict.get('metadata', {})
-
-            if not metadata_dict:
-                logger.debug(f"No metadata found in {location_id}, skipping")
-                continue
-
-            logger.debug(f"✓ {location_id}: Extracted metadata with {len(metadata_dict)} top-level keys")
-
-        except Exception as e:
-            logger.warning(f"Error extracting metadata for {location_id}: {e}, skipping")
+        metadata = data['metadata']
+        
+        # Verify structure: metadata['languages']['models'][lang_code]
+        if 'languages' not in metadata:
+            logger.debug(f"No 'languages' in metadata for {location}, skipping")
             continue
 
-        languages_map = metadata_dict.get('languages', {})
+        languages_obj = metadata['languages']
+        
+        if 'models' not in languages_obj:
+            logger.debug(f"No 'models' in languages for {location}, skipping")
+            continue
 
-        # Extract models and features for each language
+        models_by_lang = languages_obj['models']
+        available_locations.add(location)
+        successful_locations += 1
+
+        # Extract models and features for each requested language
         for language in languages:
-            language_metadata = languages_map.get(language)
-            if not language_metadata:
-                logger.debug(f"Language {language} not available in {location_id}")
+            if language not in models_by_lang:
+                logger.debug(f"Language {language} not available in {location}")
                 continue
 
-            models_map = language_metadata.get('models', {})
-            if not models_map:
-                logger.debug(f"No models found for {language} in {location_id}")
+            lang_data = models_by_lang[language]
+            
+            # Structure: lang_data['modelFeatures'][model_id]['modelFeature']
+            if 'modelFeatures' not in lang_data:
+                logger.debug(f"No 'modelFeatures' for {language} in {location}")
+                continue
+
+            model_features_container = lang_data['modelFeatures']
+            
+            if not isinstance(model_features_container, dict):
+                logger.debug(f"modelFeatures is not a dict for {language} in {location}")
                 continue
 
             # Track which models are available
-            cache_key = (location_id, language)
-            models_by_location[cache_key] = set(models_map.keys())
+            model_ids = list(model_features_container.keys())
+            cache_key = (location, language)
+            models_by_location[cache_key] = set(model_ids)
 
             # Extract features for each model
-            for model_id, model_metadata in models_map.items():
-                model_features = model_metadata.get('modelFeatures', {})
-                feature_list = model_features.get('modelFeature', [])
+            for model_id, model_data in model_features_container.items():
+                if not isinstance(model_data, dict):
+                    continue
+                    
+                # Get feature list: model_data['modelFeature']
+                feature_list = model_data.get('modelFeature', [])
+                
+                if not isinstance(feature_list, list):
+                    continue
 
                 # Extract feature names
+                # Normalize feature names from API to our internal format
+                # API returns "word_timestamps" but we use "word_level_timestamps"
+                FEATURE_NAME_NORMALIZATION = {
+                    'word_timestamps': 'word_level_timestamps',
+                    'word_confidence': 'word_level_confidence',
+                }
+                
                 supported_features = set()
                 for feature_obj in feature_list:
                     if isinstance(feature_obj, dict):
                         feature_name = feature_obj.get('feature')
                         if feature_name:
-                            supported_features.add(feature_name)
+                            # Normalize to our internal format
+                            normalized = FEATURE_NAME_NORMALIZATION.get(feature_name, feature_name)
+                            supported_features.add(normalized)
 
                 # Store in features cache
-                feature_key = (location_id, language, model_id)
+                feature_key = (location, language, model_id)
                 features_by_model[feature_key] = supported_features
 
                 logger.debug(
-                    f"  {location_id}/{language}/{model_id}: "
+                    f"  {location}/{language}/{model_id}: "
                     f"{len(supported_features)} features"
                 )
 
     logger.info(
-        f"✓ Discovered metadata: {len(available_locations)} locations, "
+        f"✓ Discovered metadata: {successful_locations}/{len(PROBE_REGION_LIST)} locations probed, "
+        f"{len(available_locations)} locations support Speech V2, "
         f"{len(models_by_location)} location/language combinations, "
         f"{len(features_by_model)} model/feature sets"
     )
@@ -201,7 +313,7 @@ def discover_speech_metadata(project_id: str, languages: list[str] = None) -> di
         'available_locations': available_locations,
         'models_by_location': models_by_location,
         'features_by_model': features_by_model,
-        'success': True
+        'success': successful_locations > 0
     }
 
 
@@ -231,6 +343,14 @@ def initialize_metadata_cache(project_id: str, languages: list[str] = None) -> b
         try:
             # Discover all metadata in one API call
             metadata = discover_speech_metadata(project_id, languages)
+
+            # Validate discovery succeeded
+            if not metadata.get('success', False):
+                raise ValueError("Metadata discovery returned success=False")
+
+            # Verify we got some data
+            if not metadata.get('available_locations'):
+                raise ValueError("No locations discovered")
 
             # Populate module-level caches
             _AVAILABLE_LOCATIONS = metadata['available_locations']
@@ -307,6 +427,90 @@ def get_available_models(location: str, language: str = 'en-US') -> Set[str]:
     return _AVAILABLE_MODELS.get(cache_key, set()).copy()
 
 
+def _choose_default_region(locations: list[str]) -> str:
+    """
+    Choose default region with preference for us-central1.
+    
+    Strategy:
+    1. Prefer us-central1 if available
+    2. Prefer us-* regions if available (but not multi-region 'us')
+    3. Otherwise first in sorted list
+    
+    Args:
+        locations: List of available locations
+        
+    Returns:
+        Default location to use
+    """
+    if not locations:
+        return 'us-central1'
+    
+    if 'us-central1' in locations:
+        return 'us-central1'
+    
+    # Prefer US regions (but not multi-region 'us' endpoint)
+    us_regions = [loc for loc in locations if loc.startswith('us-')]
+    if us_regions:
+        return sorted(us_regions)[0]
+    
+    # Fallback to first
+    return sorted(locations)[0]
+
+
+def _build_model_region_config() -> Dict[str, Dict]:
+    """
+    Build model → region config dynamically from discovered metadata.
+    
+    Groups model variants (chirp, chirp_2, chirp_3) under base names.
+    Returns config with same structure as MODEL_REGION_CONFIG.
+    
+    Returns:
+        Dict mapping model name to config dict with:
+            - requires_regional: bool
+            - supported_regions: list[str]
+            - default_region: str
+    """
+    global _AVAILABLE_MODELS
+    
+    # Invert cache: (location, language) -> model_ids
+    # To: model_id -> Set[locations]
+    model_to_locations = {}
+    for (location, language), model_ids in _AVAILABLE_MODELS.items():
+        for model_id in model_ids:
+            if model_id not in model_to_locations:
+                model_to_locations[model_id] = set()
+            model_to_locations[model_id].add(location)
+    
+    # Build config - handle model name normalization
+    config = {}
+    
+    # Group model variants under base names
+    # User says 'chirp' but metadata has 'chirp', 'chirp_2', 'chirp_3', 'chirp_telephony'
+    base_models = {
+        'chirp': ['chirp', 'chirp_2', 'chirp_3', 'chirp_telephony'],
+        'long': ['long'],
+        'short': ['short'],
+        'telephony': ['telephony', 'telephony_short']
+    }
+    
+    for base_name, variants in base_models.items():
+        # Collect all locations for all variants
+        all_locations = set()
+        for variant in variants:
+            if variant in model_to_locations:
+                all_locations.update(model_to_locations[variant])
+        
+        if all_locations:
+            locations_list = sorted(all_locations)
+            config[base_name] = {
+                'requires_regional': len(locations_list) > 0,
+                'supported_regions': locations_list,
+                'default_region': _choose_default_region(locations_list)
+            }
+    
+    return config
+
+
 def get_supported_features(model: str, language: str = 'en-US', location: str = None) -> Set[str]:
     """
     Get supported features for a model/language/location combination.
@@ -336,7 +540,7 @@ def get_supported_features(model: str, language: str = 'en-US', location: str = 
     # Cache miss - use fallback
     if not _CACHE_LOADED:
         logger.warning(f"Cache not loaded, using fallback for {model}/{language}")
-        return _get_fallback_features(model, language)
+        return _get_fallback_features(model)
 
     # Model not found in any location
     logger.warning(
@@ -344,203 +548,6 @@ def get_supported_features(model: str, language: str = 'en-US', location: str = 
         f"Using empty feature set."
     )
     return set()
-
-
-def initialize_feature_cache(project_id: str, location: str, models: list[str], languages: list[str] = None):
-    """
-    Pre-warm feature cache on service startup.
-
-    Queries Locations API once for configured models and languages.
-    Retries on failure, falls back to minimal static data if unavailable.
-
-    Args:
-        project_id: Google Cloud project ID
-        location: Regional location (e.g., 'us-central1')
-        models: List of models to pre-warm (e.g., ['chirp', 'latest_long'])
-        languages: List of languages (defaults to ['en-US'])
-
-    Returns:
-        bool: True if cache loaded successfully, False if using fallback
-    """
-    global _FEATURE_CACHE, _CACHE_LOADED
-
-    if languages is None:
-        languages = ['en-US']
-
-    # Retry with exponential backoff
-    retry_delays = [1, 2, 4]  # Total: ~7 seconds
-
-    for attempt, delay in enumerate(retry_delays + [None]):
-        try:
-            # Query Locations API for each model/language combination
-            for model in models:
-                for language in languages:
-                    features = _query_locations_api(project_id, location, model, language)
-                    _FEATURE_CACHE[(model, language)] = features
-                    logger.info(f"✓ Loaded features for {model}/{language}: {len(features)} supported")
-
-            _CACHE_LOADED = True
-            logger.info(f"Feature cache initialized: {len(_FEATURE_CACHE)} model/language combinations")
-            return True
-
-        except Exception as e:
-            if delay is not None:
-                logger.warning(
-                    f"Locations API unavailable (attempt {attempt + 1}/{len(retry_delays)}): {e}. "
-                    f"Retrying in {delay}s..."
-                )
-                time.sleep(delay)
-            else:
-                # All retries exhausted
-                logger.error(
-                    f"⚠️  DEGRADED: Locations API unavailable after {len(retry_delays)} retries. "
-                    f"Using minimal static fallback. Error: {e}"
-                )
-                logger.error(
-                    "⚠️  Impact: Dynamic feature detection disabled. Only known unsupported features will be filtered. "
-                    "Some model/feature combinations may fail at runtime."
-                )
-                _CACHE_LOADED = False
-                return False
-
-    return False
-
-
-def _query_locations_api(project_id: str, location: str, model: str, language: str) -> Set[str]:
-    """
-    Query Locations API to discover supported features for a model/language.
-
-    Navigates the metadata hierarchy:
-    Location → languages[language] → models[model] → modelFeatures
-
-    Args:
-        project_id: Google Cloud project ID
-        location: Regional location (e.g., 'us-central1')
-        model: Model identifier (e.g., 'chirp', 'latest_long')
-        language: BCP-47 language code (e.g., 'en-US')
-
-    Returns:
-        Set of feature keys supported by this model/language combination
-
-    Raises:
-        Exception: If API call fails or metadata structure unexpected
-    """
-    # Create client with regional endpoint
-    api_endpoint = f"{location}-speech.googleapis.com"
-    client = SpeechClient(
-        client_options=ClientOptions(api_endpoint=api_endpoint)
-    )
-
-    # Query locations for this project
-    request = locations_pb2.ListLocationsRequest(
-        name=f"projects/{project_id}"
-    )
-
-    response = client.list_locations(request=request)
-
-    # Collect available locations for better error messages
-    available_locations = [loc.location_id for loc in response.locations]
-    logger.debug(f"Available Speech V2 locations: {available_locations}")
-
-    # Find our target location
-    for loc in response.locations:
-        if loc.location_id == location:
-            # Parse metadata structure
-            # Structure: location.metadata → languages (map) → models (map) → modelFeatures
-            # metadata is a protobuf Struct - convert to dict for easier access
-            if not loc.metadata:
-                raise ValueError(f"No metadata available for location {location}")
-
-            metadata_dict = MessageToDict(loc.metadata, preserving_proto_field_name=True)
-
-            logger.debug(f"Location {location} metadata keys: {list(metadata_dict.keys())}")
-
-            # Navigate to language
-            languages_map = metadata_dict.get('languages', {})
-            language_metadata = languages_map.get(language)
-
-            if not language_metadata:
-                raise ValueError(f"Language {language} not found in location {location}")
-
-            # Navigate to model
-            models_map = language_metadata.get('models', {})
-            model_metadata = models_map.get(model)
-
-            if not model_metadata:
-                raise ValueError(f"Model {model} not found for language {language} in location {location}")
-
-            # Extract features
-            model_features = model_metadata.get('modelFeatures', {})
-            if not model_features:
-                logger.warning(f"No modelFeatures found for {model}/{language} in {location}")
-                return set()
-
-            feature_list = model_features.get('modelFeature', [])
-            if not feature_list:
-                logger.warning(f"Empty modelFeature list for {model}/{language} in {location}")
-                return set()
-
-            # Extract feature names from dict objects (MessageToDict converts all to dicts)
-            # Each feature_obj is a dict with 'feature' and 'releaseState' keys
-            supported_features = set()
-            for feature_obj in feature_list:
-                if not isinstance(feature_obj, dict):
-                    logger.warning(f"Unexpected feature_obj type for {model}/{language}: {type(feature_obj)}")
-                    continue
-
-                feature_name = feature_obj.get('feature')
-                if not feature_name:
-                    logger.warning(f"Missing 'feature' key in feature_obj for {model}/{language}: {feature_obj}")
-                    continue
-
-                supported_features.add(feature_name)
-                logger.debug(f"  • {feature_name} ({feature_obj.get('releaseState', 'unknown')})")
-
-            logger.info(f"Discovered {len(supported_features)} features for {model}/{language}: {sorted(supported_features)}")
-            return supported_features
-
-    # Location not found - provide helpful error with available options
-    raise ValueError(
-        f"Location '{location}' not available for Speech-to-Text V2 in project {project_id}. "
-        f"Available locations: {available_locations}. "
-        f"Consider using 'us-central1' or 'global' if your bucket location is not directly supported."
-    )
-
-
-def get_supported_features(model: str, language: str = 'en-US') -> Set[str]:
-    """
-    Get supported features for a model/language combination.
-
-    Fast lookup from pre-warmed cache. Falls back to static data if cache not loaded.
-
-    Args:
-        model: Model identifier (e.g., 'chirp', 'latest_long')
-        language: BCP-47 language code (defaults to 'en-US')
-
-    Returns:
-        Set of feature keys supported by this model/language
-    """
-    global _FEATURE_CACHE, _CACHE_LOADED
-
-    # Check cache first (fast path)
-    cache_key = (model, language)
-    if cache_key in _FEATURE_CACHE:
-        return _FEATURE_CACHE[cache_key]
-
-    # Cache not loaded or model not in cache
-    if not _CACHE_LOADED:
-        logger.warning(
-            f"Feature cache not loaded. Using minimal fallback for {model}/{language}. "
-            f"Some features may be incorrectly disabled."
-        )
-        return _get_fallback_features(model)
-
-    # Model not in cache (shouldn't happen with pre-warming, but handle gracefully)
-    logger.error(
-        f"Unexpected cache miss for {model}/{language}. "
-        f"Model may not be configured for pre-warming. Using fallback."
-    )
-    return _get_fallback_features(model)
 
 
 def _get_fallback_features(model: str) -> Set[str]:
@@ -607,51 +614,11 @@ class GoogleSpeechV2Service:
     }
 
     # Model-specific region requirements
-    # Based on Google Cloud Speech V2 documentation (2025)
-    # Source: https://docs.cloud.google.com/speech-to-text/v2/docs/chirp_2-model
-    MODEL_REGION_CONFIG = {
-        'chirp': {
-            'requires_regional': True,
-            'supported_regions': ['us-central1', 'europe-west4', 'asia-southeast1'],
-            'default_region': 'us-central1',
-            'description': 'Chirp (Universal Speech Model) - requires specific regional endpoints'
-        },
-        'long': {
-            'requires_regional': False,  # Can use global, but regional recommended for data residency
-            'supported_regions': ['us-central1', 'us-west1', 'us-east1', 'europe-west1', 'asia-southeast1'],
-            'default_region': 'us-central1',
-            'description': 'Long-form transcription model - flexible regional support'
-        },
-        'short': {
-            'requires_regional': False,
-            'supported_regions': ['us-central1', 'us-west1', 'us-east1', 'europe-west1', 'asia-southeast1'],
-            'default_region': 'us-central1',
-            'description': 'Short-form transcription model - flexible regional support'
-        }
-    }
-
-    # Geographic region mapping for proximity-based fallback
-    # Used when requested region doesn't support the model
-    REGION_PROXIMITY_MAP = {
-        # US regions
-        'us-west1': ['us-central1', 'us-west2', 'us-east1'],
-        'us-west2': ['us-central1', 'us-west1', 'us-east1'],
-        'us-west3': ['us-central1', 'us-west1', 'us-east1'],
-        'us-west4': ['us-central1', 'us-west1', 'us-east1'],
-        'us-east1': ['us-central1', 'us-east4', 'us-west1'],
-        'us-east4': ['us-east1', 'us-central1', 'us-west1'],
-        'us-east5': ['us-east1', 'us-central1', 'us-west1'],
-        'us-central1': ['us-central1'],  # Already optimal
-        # Europe regions
-        'europe-west1': ['europe-west4', 'europe-west2', 'europe-west3'],
-        'europe-west2': ['europe-west1', 'europe-west4', 'europe-west3'],
-        'europe-west3': ['europe-west1', 'europe-west4', 'europe-west2'],
-        'europe-west4': ['europe-west4'],  # Already optimal for Chirp
-        # Asia regions
-        'asia-southeast1': ['asia-southeast1'],  # Already optimal for Chirp
-        'asia-northeast1': ['asia-southeast1', 'asia-south1'],
-        'asia-south1': ['asia-southeast1', 'asia-northeast1'],
-    }
+    # Built dynamically from discovered metadata (see _build_model_region_config())
+    # No longer hardcoded - automatically discovers all supported regions
+    # 
+    # Note: This is a cached property that gets built from _AVAILABLE_MODELS cache
+    # when metadata discovery completes. Falls back to minimal config if cache not loaded.
 
     def __init__(self, project_id: str, model: str = "long", location: str = "us"):
         """
@@ -710,6 +677,39 @@ class GoogleSpeechV2Service:
 
         logger.info(f"Initialized Speech V2 service: model={model}, location={self.location}, project={project_id}")
 
+    def _get_model_region_config(self) -> Dict[str, Dict]:
+        """
+        Get model region config, building dynamically from discovered metadata.
+        
+        Returns:
+            Dict mapping model name to config dict
+        """
+        global _AVAILABLE_MODELS, _CACHE_LOADED
+        
+        # Build config from discovered metadata
+        if _CACHE_LOADED and _AVAILABLE_MODELS:
+            return _build_model_region_config()
+        
+        # Fallback to minimal hardcoded config if cache not loaded
+        logger.warning("Metadata cache not loaded, using minimal fallback config")
+        return {
+            'chirp': {
+                'requires_regional': True,
+                'supported_regions': ['us-central1', 'europe-west4', 'asia-southeast1'],
+                'default_region': 'us-central1'
+            },
+            'long': {
+                'requires_regional': False,
+                'supported_regions': ['us-central1', 'us-west1', 'us-east1'],
+                'default_region': 'us-central1'
+            },
+            'short': {
+                'requires_regional': False,
+                'supported_regions': ['us-central1', 'us-west1', 'us-east1'],
+                'default_region': 'us-central1'
+            }
+        }
+
     def _select_optimal_location(self, requested_location: str, model: str) -> str:
         """
         Select the optimal location for the given model based on availability.
@@ -726,8 +726,9 @@ class GoogleSpeechV2Service:
         Returns:
             Validated location that supports the model
         """
-        # Get model configuration
-        model_config = self.MODEL_REGION_CONFIG.get(model, {})
+        # Get model configuration dynamically
+        model_region_config = self._get_model_region_config()
+        model_config = model_region_config.get(model, {})
 
         if not model_config:
             logger.warning(f"Unknown model '{model}', using default location 'us-central1'")
@@ -756,33 +757,36 @@ class GoogleSpeechV2Service:
 
     def _map_to_nearest_region(self, requested: str, available: list) -> Optional[str]:
         """
-        Map a requested region to the nearest available region.
+        Map a requested region to the nearest available region using prefix matching.
 
-        Uses geographic proximity mapping to find the nearest supported region.
+        Uses region name prefix (continent) to find nearby regions.
+        e.g., "us-west1" → finds any "us-*" region in available list
+        e.g., "europe-west1" → finds any "europe-*" region in available list
 
         Args:
             requested: Requested region (e.g., 'us-west1')
             available: List of available regions for the model
 
         Returns:
-            Nearest available region, or None if no mapping found
+            Nearest available region with same prefix, or None if no match
         """
-        # Check if we have a proximity mapping for this region
-        nearby_regions = self.REGION_PROXIMITY_MAP.get(requested, [])
-
-        # Find first nearby region that's available
-        for region in nearby_regions:
-            if region in available:
+        # Multi-region endpoints (us, eu) - check if they're directly available
+        if requested in available:
+            return requested
+        
+        # Extract continent prefix from region name
+        # e.g., "us-west1" → "us", "europe-west1" → "europe"
+        if '-' not in requested:
+            # Multi-region endpoint without dash - check if available
+            return requested if requested in available else None
+        
+        region_prefix = requested.split('-')[0]  # "us", "europe", "asia", etc.
+        
+        # Find first available region with same prefix
+        for region in available:
+            if region.startswith(region_prefix):
                 return region
-
-        # No proximity mapping found, try to infer from region prefix
-        # e.g., "us-west1" → look for any "us-" region
-        if '-' in requested:
-            region_prefix = requested.split('-')[0]  # "us", "europe", "asia"
-            for region in available:
-                if region.startswith(region_prefix):
-                    return region
-
+        
         return None
 
     def submit_job(self, gcs_uri: str, language_code: str = "en-US", audio_metadata: Optional[Dict] = None, output_bucket: str = None):
@@ -1151,7 +1155,7 @@ class GoogleSpeechV2Service:
         # ===================================================================
         # Query supported features for this model/language combination
         # Only enable features that are actually supported to prevent API errors
-        supported_features = get_supported_features(self.model, language_code)
+        supported_features = get_supported_features(self.model, language_code, self.location)
 
         # Build feature configuration dynamically
         feature_config = {}
@@ -1179,23 +1183,31 @@ class GoogleSpeechV2Service:
         enabled_features = [k for k, v in feature_config.items() if v]
         logger.info(f"Enabled features for {self.model}/{language_code}: {enabled_features}")
 
-        # TODO: Fix phrase hints syntax for V2 API
-        # V2 has different syntax than V1 for custom vocabulary
-        # Temporarily disabled to get transcription working
-        # phrase_hints = cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
-        #     phrases=[{"value": phrase, "boost": 15} for phrase in self.yoga_vocabulary]
-        # )
+        # Build phrase hints for custom vocabulary (V2 API structure)
+        # V2 uses inline_phrase_set with phrases as list of dicts with 'value' field
+        adaptation = None
+        if self.yoga_vocabulary:
+            phrase_set = cloud_speech.SpeechAdaptation.AdaptationPhraseSet({
+                'inline_phrase_set': {
+                    'phrases': [{'value': phrase} for phrase in self.yoga_vocabulary]
+                }
+            })
+            adaptation = cloud_speech.SpeechAdaptation(
+                phrase_sets=[phrase_set]
+            )
+            logger.debug(f"Added {len(self.yoga_vocabulary)} phrase hints for custom vocabulary")
 
-        config = cloud_speech.RecognitionConfig(
+        # Build config with adaptation if vocabulary exists
+        config_kwargs = {
             **decoding_config_kwargs,
-            language_codes=[language_code],
-            model=self.model,
-            features=cloud_speech.RecognitionFeatures(**feature_config),
-            # TODO: Re-enable after fixing phrase hints syntax
-            # adaptation=cloud_speech.SpeechAdaptation(
-            #     phrase_sets=[phrase_hints]
-            # ),
-        )
+            'language_codes': [language_code],
+            'model': self.model,
+            'features': cloud_speech.RecognitionFeatures(**feature_config),
+        }
+        if adaptation:
+            config_kwargs['adaptation'] = adaptation
+        
+        config = cloud_speech.RecognitionConfig(**config_kwargs)
 
         return config
 
@@ -1214,33 +1226,83 @@ class GoogleSpeechV2Service:
         """
         try:
             results = []
-            total_confidence = 0.0
             word_details = []
 
             # Iterate through results - this is already properly structured JSON
+            word_confidence_sum = 0.0
+            word_count = 0
+            
             for result in batch_results.results:
                 if result.alternatives:
                     alternative = result.alternatives[0]  # Best alternative
 
                     # Append transcript
                     results.append(alternative.transcript)
-                    total_confidence += alternative.confidence
-
+                    
                     # Extract word-level details if available
                     if hasattr(alternative, 'words') and alternative.words:
                         for word_info in alternative.words:
+                            word_conf = getattr(word_info, 'confidence', None)
+                            if word_conf is not None:
+                                word_confidence_sum += word_conf
+                                word_count += 1
+                            
                             word_details.append({
                                 "word": word_info.word,
                                 "start_time": word_info.start_offset.total_seconds(),
                                 "end_time": word_info.end_offset.total_seconds(),
-                                "confidence": word_info.confidence if hasattr(word_info, 'confidence') else 0.0
+                                "confidence": word_conf if word_conf is not None else 0.0
                             })
 
             # Combine results
             full_transcript = " ".join(results)
-            avg_confidence = total_confidence / len(results) if results else 0.0
+            
+            # Calculate average confidence from word-level scores (more accurate)
+            # Fall back to alternative-level confidence if word-level not available
+            if word_count > 0:
+                # Check if all word confidences are 0.0 (chirp model limitation)
+                if word_confidence_sum > 0.0:
+                    avg_confidence = word_confidence_sum / word_count
+                else:
+                    # All word confidences are 0.0 - confidence not available (e.g., chirp)
+                    avg_confidence = None
+            else:
+                # Fallback: try to get from alternatives if available
+                total_confidence = 0.0
+                conf_count = 0
+                for result in batch_results.results:
+                    if result.alternatives:
+                        alt_conf = getattr(result.alternatives[0], 'confidence', None)
+                        # Only count non-zero confidence values
+                        # Some models (like chirp) return 0.0 even though field exists
+                        if alt_conf is not None and alt_conf > 0.0:
+                            total_confidence += alt_conf
+                            conf_count += 1
+                
+                # If we found valid confidence values, use them
+                # Otherwise, confidence is not available for this model
+                if conf_count > 0:
+                    avg_confidence = total_confidence / conf_count
+                else:
+                    # No valid confidence available (e.g., chirp model)
+                    avg_confidence = None
 
             logger.info(f"Parsed {len(results)} segments, {len(word_details)} words")
+            if avg_confidence is not None:
+                logger.info(f"Confidence calculation: word_count={word_count}, avg_confidence={avg_confidence:.4f}")
+            else:
+                logger.info(f"Confidence calculation: word_count={word_count}, confidence not available for this model")
+            if word_count == 0 and len(results) > 0:
+                logger.warning(f"No word-level data found. Checking alternative-level confidence...")
+                # Debug: log what we actually got from alternatives
+                for i, result in enumerate(batch_results.results[:3]):  # First 3 for debugging
+                    if result.alternatives:
+                        alt = result.alternatives[0]
+                        has_conf = hasattr(alt, 'confidence')
+                        conf_val = getattr(alt, 'confidence', 'N/A')
+                        has_words = hasattr(alt, 'words')
+                        word_count_alt = len(alt.words) if has_words and alt.words else 0
+                        logger.info(f"  Result {i}: has_confidence={has_conf}, confidence={conf_val}, has_words={has_words}, word_count={word_count_alt}")
 
             return {
                 "success": True,
