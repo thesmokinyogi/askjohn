@@ -26,23 +26,131 @@
         h1 { font-size: 28px; margin-bottom: 8px; }
         .subtitle { color: #666; margin-bottom: 20px; font-size: 14px; }
 
-        /* Budget Banner */
-        .budget-banner {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            padding: 12px 15px;
-            border-radius: 8px;
+        /* Budget Display */
+        .budget-container {
             margin-bottom: 20px;
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            font-size: 13px;
-            position: relative;
         }
 
-        .budget-item { text-align: center; }
-        .budget-label { font-size: 10px; opacity: 0.9; margin-bottom: 3px; }
-        .budget-value { font-size: 16px; font-weight: 700; }
+        .budget-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .budget-header-label {
+            font-size: 11px;
+            opacity: 0.9;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .budget-header-value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .providers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+        }
+
+        .provider-card {
+            background: white;
+            border-radius: 10px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+            transition: all 0.2s;
+        }
+
+        .provider-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .provider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f3f4f6;
+        }
+
+        .provider-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: #333;
+            text-transform: capitalize;
+        }
+
+        .provider-cost {
+            font-size: 18px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .provider-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .provider-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .provider-stat-label {
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .provider-stat-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .free-tier-info {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
+
+        .free-tier-info .provider-stat-label,
+        .free-tier-info .provider-stat-value {
+            color: white;
+        }
+
+        .free-tier-reset {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.95);
+            margin-top: 4px;
+            font-weight: 500;
+        }
+
+        .credit-info {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-top: 8px;
+        }
+
+        .credit-info .provider-stat-label,
+        .credit-info .provider-stat-value {
+            color: white;
+        }
 
         /* Upload */
         .upload-area {
@@ -377,6 +485,7 @@
 
         .confidence.medium { background: #f59e0b; }
         .confidence.low { background: #ef4444; }
+        .confidence.na { background: #9ca3af; }
 
         .transcript-box {
             background: #f8f9fa;
@@ -446,18 +555,13 @@
         <p class="subtitle">75% cost savings with Dynamic Batch processing</p>
 
         <!-- Budget Display -->
-        <div class="budget-banner" id="budgetBanner">
-            <div class="budget-item">
-                <div class="budget-label">This Month</div>
-                <div class="budget-value" id="budgetUsed">$0 / $250</div>
+        <div class="budget-container" id="budgetContainer">
+            <div class="budget-header">
+                <div class="budget-header-label">Costs Month-to-Date</div>
+                <div class="budget-header-value" id="budgetTotal">$0.00 / $250</div>
             </div>
-            <div class="budget-item">
-                <div class="budget-label">Free Tier</div>
-                <div class="budget-value" id="freeTier">0 / 60 min</div>
-            </div>
-            <div class="budget-item">
-                <div class="budget-label">Remaining</div>
-                <div class="budget-value" id="budgetRemaining">$250</div>
+            <div class="providers-grid" id="providersGrid">
+                <!-- Provider cards will be rendered here -->
             </div>
         </div>
 
@@ -619,16 +723,91 @@
         function updateBudgetDisplay() {
             if (!budgetData) return;
 
-            document.getElementById('budgetUsed').textContent =
+            // Update total costs
+            document.getElementById('budgetTotal').textContent =
                 `$${budgetData.total_spent.toFixed(2)} / $${budgetData.monthly_budget.toFixed(0)}`;
-            document.getElementById('budgetRemaining').textContent =
-                `$${budgetData.remaining.toFixed(2)}`;
 
-            if (budgetData.provider && budgetData.provider.free_tier) {
-                const ft = budgetData.provider.free_tier;
-                document.getElementById('freeTier').textContent =
-                    `${Math.round(ft.used)} / ${Math.round(ft.limit)} min`;
+            // Render provider cards
+            const providersGrid = document.getElementById('providersGrid');
+            providersGrid.innerHTML = '';
+
+            if (budgetData.providers) {
+                for (const [providerName, providerData] of Object.entries(budgetData.providers)) {
+                    const card = createProviderCard(providerName, providerData);
+                    providersGrid.appendChild(card);
+                }
             }
+        }
+
+        // Create a provider card
+        function createProviderCard(providerName, providerData) {
+            const card = document.createElement('div');
+            card.className = 'provider-card';
+
+            // Provider header with name and cost
+            const header = document.createElement('div');
+            header.className = 'provider-header';
+            header.innerHTML = `
+                <div class="provider-name">${providerName}</div>
+                <div class="provider-cost">$${providerData.total_cost.toFixed(2)}</div>
+            `;
+            card.appendChild(header);
+
+            // Stats container
+            const stats = document.createElement('div');
+            stats.className = 'provider-stats';
+
+            // Transcription count
+            const countStat = document.createElement('div');
+            countStat.className = 'provider-stat';
+            countStat.innerHTML = `
+                <span class="provider-stat-label">Transcriptions</span>
+                <span class="provider-stat-value">${providerData.transcription_count}</span>
+            `;
+            stats.appendChild(countStat);
+
+            // Free tier or credit info
+            if (providerData.free_tier) {
+                const ft = providerData.free_tier;
+                const freeTierDiv = document.createElement('div');
+                freeTierDiv.className = 'free-tier-info';
+                freeTierDiv.innerHTML = `
+                    <div class="provider-stat">
+                        <span class="provider-stat-label">Free Tier</span>
+                        <span class="provider-stat-value">${Math.round(ft.used)} / ${Math.round(ft.limit)} min</span>
+                    </div>
+                `;
+                
+                // Add reset date if available
+                if (ft.reset_date_display && ft.days_until_reset !== undefined) {
+                    const resetDiv = document.createElement('div');
+                    resetDiv.className = 'free-tier-reset';
+                    if (ft.days_until_reset === 0) {
+                        resetDiv.textContent = `Resets today (${ft.reset_date_display})`;
+                    } else if (ft.days_until_reset === 1) {
+                        resetDiv.textContent = `Resets tomorrow (${ft.reset_date_display})`;
+                    } else {
+                        resetDiv.textContent = `Resets in ${ft.days_until_reset} days (${ft.reset_date_display})`;
+                    }
+                    freeTierDiv.appendChild(resetDiv);
+                }
+                
+                stats.appendChild(freeTierDiv);
+            } else if (providerData.credit) {
+                const credit = providerData.credit;
+                const creditDiv = document.createElement('div');
+                creditDiv.className = 'credit-info';
+                creditDiv.innerHTML = `
+                    <div class="provider-stat">
+                        <span class="provider-stat-label">Credit</span>
+                        <span class="provider-stat-value">$${credit.used.toFixed(2)} / $${credit.limit.toFixed(2)}</span>
+                    </div>
+                `;
+                stats.appendChild(creditDiv);
+            }
+
+            card.appendChild(stats);
+            return card;
         }
 
         // Render model options
@@ -1021,18 +1200,31 @@
                 const elapsed = jobStartTime ? Math.round((Date.now() - jobStartTime) / 1000) : 0;
                 const elapsedMsg = elapsed > 0 ? `${elapsed}s elapsed` : '';
 
-                // Estimate remaining time based on file duration and model
-                const estimatedTime = getEstimatedProcessingTime(fileDurationMinutes, data.model);
-                const progressMsg = getProgressMessage(elapsed, estimatedTime, data.model);
-
-                jobMessage.innerHTML = `
-                    <strong>Status:</strong> 🔄 Processing<br>
-                    <strong>File:</strong> ${data.filename} (${fileDurationMinutes.toFixed(1)} min)<br>
-                    <strong>Model:</strong> ${data.model}<br>
-                    <br>
-                    <em>${progressMsg}</em><br>
-                    ${elapsedMsg ? `<em style="font-size: 12px; color: #666;">${elapsedMsg}</em>` : ''}
-                `;
+                // Get estimate from API (learned from historical data)
+                getEstimatedProcessingTime(fileDurationMinutes, data.model).then(estimatedTime => {
+                    const progressMsg = getProgressMessage(elapsed, estimatedTime, data.model);
+                    jobMessage.innerHTML = `
+                        <strong>Status:</strong> 🔄 Processing<br>
+                        <strong>File:</strong> ${data.filename} (${fileDurationMinutes.toFixed(1)} min)<br>
+                        <strong>Model:</strong> ${data.model}<br>
+                        <br>
+                        <em>${progressMsg}</em><br>
+                        ${elapsedMsg ? `<em style="font-size: 12px; color: #666;">${elapsedMsg}</em>` : ''}
+                    `;
+                }).catch(err => {
+                    // Fallback to hardcoded estimate if API fails
+                    console.warn('Failed to get learned estimate, using fallback:', err);
+                    const estimatedTime = getEstimatedProcessingTimeFallback(fileDurationMinutes, data.model);
+                    const progressMsg = getProgressMessage(elapsed, estimatedTime, data.model);
+                    jobMessage.innerHTML = `
+                        <strong>Status:</strong> 🔄 Processing<br>
+                        <strong>File:</strong> ${data.filename} (${fileDurationMinutes.toFixed(1)} min)<br>
+                        <strong>Model:</strong> ${data.model}<br>
+                        <br>
+                        <em>${progressMsg}</em><br>
+                        ${elapsedMsg ? `<em style="font-size: 12px; color: #666;">${elapsedMsg}</em>` : ''}
+                    `;
+                });
             } else if (data.status === 'complete') {
                 const elapsed = jobStartTime ? Math.round((Date.now() - jobStartTime) / 1000) : 0;
                 jobMessage.innerHTML = `
@@ -1042,8 +1234,26 @@
             }
         }
 
-        // Estimate processing time based on audio duration and model
-        function getEstimatedProcessingTime(durationMinutes, model) {
+        // Get estimated processing time from API (learned from historical data)
+        async function getEstimatedProcessingTime(durationMinutes, model) {
+            try {
+                const response = await fetch(
+                    `/api/estimate-processing-time?model=${encodeURIComponent(model)}&duration_minutes=${durationMinutes}`
+                );
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                const data = await response.json();
+                return data.estimated_seconds;
+            } catch (error) {
+                console.warn('Failed to get learned estimate:', error);
+                // Fallback to hardcoded estimate
+                return getEstimatedProcessingTimeFallback(durationMinutes, model);
+            }
+        }
+
+        // Fallback: Hardcoded estimates (used if API fails or no data available)
+        function getEstimatedProcessingTimeFallback(durationMinutes, model) {
             // Rough estimates:
             // Batch models: ~30-60s base + 5s per minute of audio
             // Standard models: ~15-30s base + 3s per minute of audio
@@ -1090,16 +1300,22 @@
             document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
 
             // Confidence
-            const confidence = Math.round((data.confidence || 0) * 100);
             const confidenceEl = document.getElementById('confidence');
-            confidenceEl.textContent = `${confidence}% confident`;
+            if (data.confidence !== null && data.confidence !== undefined) {
+                const confidence = Math.round(data.confidence * 100);
+                confidenceEl.textContent = `${confidence}% confident`;
 
-            if (confidence >= 90) {
-                confidenceEl.className = 'confidence';
-            } else if (confidence >= 70) {
-                confidenceEl.className = 'confidence medium';
+                if (confidence >= 90) {
+                    confidenceEl.className = 'confidence';
+                } else if (confidence >= 70) {
+                    confidenceEl.className = 'confidence medium';
+                } else {
+                    confidenceEl.className = 'confidence low';
+                }
             } else {
-                confidenceEl.className = 'confidence low';
+                // Confidence not available for this model (e.g., chirp)
+                confidenceEl.textContent = 'Confidence N/A';
+                confidenceEl.className = 'confidence na';
             }
 
             // Stats

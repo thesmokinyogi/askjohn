@@ -138,10 +138,26 @@ class BudgetService:
 
             # Add free tier info
             if provider == "google":
+                free_tier_used = provider_data.get("free_tier_used", 0.0)
+                free_tier_limit = provider_data.get("free_tier_limit", 60.0)
+                free_tier_remaining = free_tier_limit - free_tier_used
+                
+                # Calculate reset date (1st of next calendar month)
+                now = datetime.now()
+                if now.month == 12:
+                    reset_date = datetime(now.year + 1, 1, 1)
+                else:
+                    reset_date = datetime(now.year, now.month + 1, 1)
+                
+                days_until_reset = (reset_date - now).days
+                
                 summary["provider"]["free_tier"] = {
-                    "used": provider_data.get("free_tier_used", 0.0),
-                    "limit": provider_data.get("free_tier_limit", 60.0),
-                    "remaining": provider_data.get("free_tier_limit", 60.0) - provider_data.get("free_tier_used", 0.0)
+                    "used": free_tier_used,
+                    "limit": free_tier_limit,
+                    "remaining": free_tier_remaining,
+                    "reset_date": reset_date.isoformat(),
+                    "reset_date_display": reset_date.strftime("%B %d, %Y"),
+                    "days_until_reset": days_until_reset
                 }
             elif provider == "whisper":
                 summary["provider"]["credit"] = {
@@ -154,15 +170,45 @@ class BudgetService:
             # Add all providers
             summary["providers"] = {}
             for prov_name, prov_data in self.data["providers"].items():
-                summary["providers"][prov_name] = {
-                    "total_cost": prov_data.get("total_cost", 0.0),
+                provider_info = {
+                    "total_cost": round(prov_data.get("total_cost", 0.0), 2),
                     "transcription_count": len(prov_data.get("transcriptions", []))
                 }
 
                 if prov_name == "google":
-                    summary["providers"][prov_name]["free_tier_remaining"] = (
-                        prov_data.get("free_tier_limit", 60.0) - prov_data.get("free_tier_used", 0.0)
-                    )
+                    free_tier_used = prov_data.get("free_tier_used", 0.0)
+                    free_tier_limit = prov_data.get("free_tier_limit", 60.0)
+                    free_tier_remaining = free_tier_limit - free_tier_used
+                    
+                    # Calculate reset date (1st of next calendar month)
+                    now = datetime.now()
+                    if now.month == 12:
+                        reset_date = datetime(now.year + 1, 1, 1)
+                    else:
+                        reset_date = datetime(now.year, now.month + 1, 1)
+                    
+                    days_until_reset = (reset_date - now).days
+                    
+                    provider_info["free_tier"] = {
+                        "used": free_tier_used,
+                        "limit": free_tier_limit,
+                        "remaining": free_tier_remaining,
+                        "reset_date": reset_date.isoformat(),
+                        "reset_date_display": reset_date.strftime("%B %d, %Y"),
+                        "days_until_reset": days_until_reset
+                    }
+                elif prov_name == "whisper":
+                    credit_used = prov_data.get("credit_used", 0.0)
+                    credit_limit = prov_data.get("credit_limit", 5.0)
+                    credit_remaining = credit_limit - credit_used
+                    
+                    provider_info["credit"] = {
+                        "used": credit_used,
+                        "limit": credit_limit,
+                        "remaining": credit_remaining
+                    }
+                
+                summary["providers"][prov_name] = provider_info
 
         return summary
 

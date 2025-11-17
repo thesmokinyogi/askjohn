@@ -26,6 +26,7 @@ from app.services.transcribe_v2 import (
 from app.services.storage import CloudStorageService
 from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
+from app.services.processing_time import get_processing_time_service
 from app.services.jobs import get_job_storage
 from app.services.audio_metadata import get_audio_metadata_service
 from app.services.library import LibraryService
@@ -47,10 +48,35 @@ TEST_AUDIO_METADATA = {
 # ===================================
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Set up both console and file logging
+import logging.handlers
+log_dir = Path(__file__).parent.parent / "logs"
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "server.log"
+
+# Create formatter
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+
+# File handler (rotating, max 10MB, keep 5 backups)
+file_handler = logging.handlers.RotatingFileHandler(
+    log_file,
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
 )
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(formatter)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
@@ -76,11 +102,12 @@ GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "long")  # Renamed from STT_MODEL
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 
-# Initialize pricing, budget, job storage, and library services
+# Initialize pricing, budget, job storage, library, and processing time services
 pricing_service = get_pricing_service()
 budget_service = get_budget_service(monthly_budget=MONTHLY_BUDGET)
 job_storage = get_job_storage()
 library_service = LibraryService()
+processing_time_service = get_processing_time_service()
 
 # Initialize services based on provider
 if STT_PROVIDER == "google":
@@ -484,6 +511,15 @@ async def check_job_status(job_id: str):
             job_id=job_id,
             gcs_uri=job_record.get("gcs_uri")
         )
+        
+        # If Google says it's processing and we haven't tracked processing_started_at yet, set it now
+        # This handles cases where status check happens after processing has already started
+        if status_result.get("status") == "processing" and not job_record.get("processing_started_at"):
+            from datetime import datetime
+            job_storage.update_job(job_id, {
+                "processing_started_at": datetime.now().isoformat()
+            })
+            logger.info(f"Detected job {job_id} is processing, setting processing_started_at")
 
         # ===== STEP 3: Update our job record if status changed =====
 
@@ -494,29 +530,81 @@ async def check_job_status(job_id: str):
                 # Success! Update job record with results
                 logger.info(f"Job {job_id} completed successfully")
 
-                # Calculate actual cost from billed duration
-                # Google's metadata includes the actual billed time
-                # For now, use estimated cost (we'll enhance this later)
-                actual_cost = job_record["estimated_cost"]
+                # Calculate actual cost and free minutes from billed duration
+                # Use actual billed duration from Google's API response (not estimated)
+                metadata = status_result.get("metadata", {})
+                billed_duration_minutes = metadata.get("billed_duration_minutes")
+                
+                # Fall back to estimated duration if Google didn't provide billed duration
+                if billed_duration_minutes is None:
+                    logger.warning(f"Job {job_id} missing billed_duration_minutes in metadata, using estimated duration")
+                    billed_duration_minutes = job_record["duration_minutes"]
+                else:
+                    logger.info(f"Using actual billed duration from Google: {billed_duration_minutes:.2f} minutes")
+                
+                # Get current free tier remaining
+                from app.services.budget import get_budget_service
+                budget_service = get_budget_service()
+                free_tier_remaining = budget_service.get_free_tier_remaining(STT_PROVIDER)
+                
+                # Calculate actual free minutes used and billable minutes
+                actual_free_minutes_used = min(billed_duration_minutes, free_tier_remaining)
+                actual_billable_minutes = max(0, billed_duration_minutes - free_tier_remaining)
+                
+                # Calculate actual cost
+                cost_per_minute = pricing_service.get_cost_per_minute(STT_PROVIDER, job_record["model"])
+                actual_cost = actual_billable_minutes * cost_per_minute
+                
+                # For now, use estimated cost if actual calculation fails
+                if actual_cost is None or actual_cost < 0:
+                    actual_cost = job_record["estimated_cost"]
 
                 # Update job record in storage
+                # Include words in metadata for post-processing
+                metadata = status_result.get("metadata", {}).copy()
+                if "words" in status_result:
+                    metadata["words"] = status_result["words"]
+                
                 job_storage.mark_complete(
                     job_id=job_id,
                     transcript=status_result["transcript"],
                     confidence=status_result["confidence"],
                     actual_cost=actual_cost,
-                    metadata=status_result.get("metadata")
+                    metadata=metadata
+                )
+
+                # Record processing time for feedback loop
+                # Use processing_started_at if available (excludes queueing time)
+                # Fall back to submitted_at if processing_started_at not tracked
+                from datetime import datetime
+                completed_at = datetime.now()
+                
+                # Prefer processing_started_at to exclude queueing time
+                if job_record.get("processing_started_at"):
+                    start_time = datetime.fromisoformat(job_record["processing_started_at"])
+                    processing_time_seconds = (completed_at - start_time).total_seconds()
+                    logger.info(f"Using processing_started_at for time calculation (excludes queueing)")
+                else:
+                    # Fallback: use submitted_at (includes queueing time)
+                    submitted_at = datetime.fromisoformat(job_record["submitted_at"])
+                    processing_time_seconds = (completed_at - submitted_at).total_seconds()
+                    logger.warning(f"processing_started_at not available, using submitted_at (includes queueing time)")
+                
+                processing_time_service.record_processing_time(
+                    model=job_record["model"],
+                    audio_duration_minutes=job_record["duration_minutes"],
+                    processing_time_seconds=processing_time_seconds,
+                    job_id=job_id
                 )
 
                 # Update budget service with actual usage
                 # This tracks our monthly spending
-                from app.services.budget import get_budget_service
-                budget_service = get_budget_service()
                 budget_service.record_transcription(
                     provider=STT_PROVIDER,
                     model=job_record["model"],
-                    duration_minutes=job_record["duration_minutes"],
-                    cost=actual_cost
+                    duration_minutes=billed_duration_minutes,
+                    cost=actual_cost,
+                    free_minutes_used=actual_free_minutes_used
                 )
 
                 # Add to library - permanent storage for completed transcripts
@@ -589,8 +677,23 @@ async def check_job_status(job_id: str):
 
         # Job is still queued or processing at Google
         # Update our record to show it's in progress (not just queued)
+        # Track when processing actually starts (if not already tracked)
+        from datetime import datetime
+        updates = {}
+        
         if job_record["status"] == "queued":
-            job_storage.update_job(job_id, {"status": "processing"})
+            # Transitioning from queued to processing
+            updates["status"] = "processing"
+            updates["processing_started_at"] = datetime.now().isoformat()
+            logger.info(f"Job {job_id} transitioned from queued to processing")
+        elif job_record["status"] == "processing" and not job_record.get("processing_started_at"):
+            # Already processing but processing_started_at wasn't set (e.g., job created before this feature)
+            # Set it now (approximation - actual start was earlier)
+            updates["processing_started_at"] = datetime.now().isoformat()
+            logger.info(f"Job {job_id} was already processing, setting processing_started_at now (approximation)")
+        
+        if updates:
+            job_storage.update_job(job_id, updates)
 
         return JSONResponse(content={
             "job_id": job_id,
@@ -726,13 +829,14 @@ async def get_config():
 @app.get("/api/budget")
 async def get_budget():
     """
-    Get current budget summary.
+    Get current budget summary for all providers.
 
     Returns:
-        Budget summary with usage, remaining budget, free tier info
+        Budget summary with usage, remaining budget, free tier info for all providers
     """
     try:
-        summary = budget_service.get_budget_summary(provider=STT_PROVIDER)
+        # Get summary for all providers (no provider filter)
+        summary = budget_service.get_budget_summary(provider=None)
         return JSONResponse(content=summary)
     except Exception as e:
         logger.error(f"Error getting budget summary: {e}")
@@ -828,6 +932,38 @@ async def detect_duration(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Error detecting duration: {str(e)}"
         )
+
+
+@app.get("/api/estimate-processing-time")
+async def estimate_processing_time(model: str, duration_minutes: float):
+    """
+    Get estimated processing time for a transcription job.
+
+    Uses learned estimates from historical data, with fallback to hardcoded values.
+
+    Args:
+        model: Model name (e.g., 'chirp_standard', 'long_standard')
+        duration_minutes: Audio duration in minutes
+
+    Returns:
+        Dict with estimated_seconds, confidence, and model details
+    """
+    try:
+        if duration_minutes <= 0:
+            raise HTTPException(status_code=400, detail="duration_minutes must be > 0")
+
+        estimate = processing_time_service.get_estimate(
+            model=model,
+            audio_duration_minutes=duration_minutes
+        )
+
+        return JSONResponse(content=estimate)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error estimating processing time: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/estimate-cost")

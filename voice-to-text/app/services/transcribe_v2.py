@@ -892,10 +892,49 @@ class GoogleSpeechV2Service:
 
             if not is_done:
                 # Job is still queued or processing
-                logger.info(f"Job {job_id} is still in progress")
+                # Try to determine actual status from operation metadata
+                status = "processing"  # Default
+                
+                # Check if operation.metadata has status information
+                if hasattr(operation, 'metadata') and operation.metadata:
+                    # Metadata is a protobuf Any type - need to unpack it
+                    try:
+                        # Unpack the Any protobuf to get OperationMetadata
+                        # cloud_speech is already imported at module level
+                        operation_metadata = cloud_speech.OperationMetadata()
+                        operation.metadata.Unpack(operation_metadata)
+                        
+                        logger.debug(f"Unpacked OperationMetadata: {operation_metadata}")
+                        
+                        # Check for progress_percent field (indicates active processing)
+                        if hasattr(operation_metadata, 'progress_percent'):
+                            progress = operation_metadata.progress_percent
+                            if progress is not None:
+                                # If progress is available, it's actively processing
+                                status = "processing"
+                                logger.debug(f"Job {job_id} is processing (progress: {progress}%)")
+                            else:
+                                # No progress yet - might be queued
+                                status = "queued"
+                                logger.debug(f"Job {job_id} appears to be queued (no progress)")
+                        
+                        # Check for state field (if available)
+                        elif hasattr(operation_metadata, 'state'):
+                            state = operation_metadata.state
+                            if state == cloud_speech.OperationMetadata.State.QUEUED:
+                                status = "queued"
+                            elif state == cloud_speech.OperationMetadata.State.RUNNING:
+                                status = "processing"
+                            logger.debug(f"Job {job_id} state from metadata: {state}")
+                        
+                    except Exception as e:
+                        logger.debug(f"Could not unpack/extract status from metadata: {e}")
+                        # Fall back to default "processing" status
+                
+                logger.info(f"Job {job_id} is still in progress (status: {status})")
                 return {
                     "done": False,
-                    "status": "processing",  # Could be queued or actively processing
+                    "status": status,
                     "transcript": None,
                     "confidence": None,
                     "words": None,
@@ -1185,17 +1224,25 @@ class GoogleSpeechV2Service:
 
         # Build phrase hints for custom vocabulary (V2 API structure)
         # V2 uses inline_phrase_set with phrases as list of dicts with 'value' field
+        # NOTE: Chirp models do NOT support speech adaptation (phrase hints)
+        # Only enable for models that support it (e.g., long, short)
         adaptation = None
         if self.yoga_vocabulary:
-            phrase_set = cloud_speech.SpeechAdaptation.AdaptationPhraseSet({
-                'inline_phrase_set': {
-                    'phrases': [{'value': phrase} for phrase in self.yoga_vocabulary]
-                }
-            })
-            adaptation = cloud_speech.SpeechAdaptation(
-                phrase_sets=[phrase_set]
-            )
-            logger.debug(f"Added {len(self.yoga_vocabulary)} phrase hints for custom vocabulary")
+            # Check if model supports adaptation
+            # Chirp models (chirp, chirp_2, chirp_3, chirp_telephony) don't support adaptation
+            chirp_models = {'chirp', 'chirp_2', 'chirp_3', 'chirp_telephony'}
+            if self.model not in chirp_models:
+                phrase_set = cloud_speech.SpeechAdaptation.AdaptationPhraseSet({
+                    'inline_phrase_set': {
+                        'phrases': [{'value': phrase} for phrase in self.yoga_vocabulary]
+                    }
+                })
+                adaptation = cloud_speech.SpeechAdaptation(
+                    phrase_sets=[phrase_set]
+                )
+                logger.debug(f"Added {len(self.yoga_vocabulary)} phrase hints for custom vocabulary")
+            else:
+                logger.info(f"Skipping phrase hints - {self.model} does not support speech adaptation")
 
         # Build config with adaptation if vocabulary exists
         config_kwargs = {
@@ -1287,6 +1334,19 @@ class GoogleSpeechV2Service:
                     # No valid confidence available (e.g., chirp model)
                     avg_confidence = None
 
+            # Extract billed duration from metadata (actual usage from Google)
+            billed_duration_seconds = None
+            for result in batch_results.results:
+                if hasattr(result, 'metadata') and result.metadata:
+                    if hasattr(result.metadata, 'total_billed_duration'):
+                        # total_billed_duration is a Duration protobuf
+                        duration = result.metadata.total_billed_duration
+                        if duration:
+                            # Convert Duration to seconds
+                            billed_duration_seconds = duration.total_seconds()
+                            logger.info(f"Extracted billed duration from batch results: {billed_duration_seconds:.2f} seconds")
+                            break  # Use first result's metadata
+
             logger.info(f"Parsed {len(results)} segments, {len(word_details)} words")
             if avg_confidence is not None:
                 logger.info(f"Confidence calculation: word_count={word_count}, avg_confidence={avg_confidence:.4f}")
@@ -1304,17 +1364,26 @@ class GoogleSpeechV2Service:
                         word_count_alt = len(alt.words) if has_words and alt.words else 0
                         logger.info(f"  Result {i}: has_confidence={has_conf}, confidence={conf_val}, has_words={has_words}, word_count={word_count_alt}")
 
+            # Build metadata with actual billed duration from Google
+            metadata = {
+                "total_words": len(word_details),
+                "model": self.model,
+                "language": "en-US",
+                "api_version": "v2"
+            }
+            
+            # Include actual billed duration from Google (if available)
+            if billed_duration_seconds is not None:
+                metadata["billed_duration_seconds"] = round(billed_duration_seconds, 2)
+                metadata["billed_duration_minutes"] = round(billed_duration_seconds / 60.0, 2)
+                logger.info(f"Including billed duration in metadata: {metadata['billed_duration_minutes']:.2f} minutes")
+
             return {
                 "success": True,
                 "transcript": full_transcript,
                 "confidence": avg_confidence,
                 "words": word_details,
-                "metadata": {
-                    "total_words": len(word_details),
-                    "model": self.model,
-                    "language": "en-US",
-                    "api_version": "v2"
-                }
+                "metadata": metadata
             }
 
         except Exception as e:
@@ -1426,23 +1495,45 @@ class GoogleSpeechV2Service:
                     else:
                         logger.warning(f"No inline_result found for {uri_or_idx}")
 
+            # Extract billed duration from metadata (actual usage from Google)
+            billed_duration_seconds = None
+            for uri_or_idx, result in items:
+                if hasattr(result, 'metadata') and result.metadata:
+                    if hasattr(result.metadata, 'total_billed_duration'):
+                        # total_billed_duration is a Duration protobuf
+                        duration = result.metadata.total_billed_duration
+                        if duration:
+                            # Convert Duration to seconds
+                            billed_duration_seconds = duration.total_seconds()
+                            logger.info(f"Extracted billed duration: {billed_duration_seconds:.2f} seconds")
+                            break  # Use first result's metadata
+
             # Combine results
             full_transcript = " ".join(results)
             avg_confidence = total_confidence / len(results) if results else 0.0
 
             logger.info(f"Parsed {len(results)} result segments, {len(word_details)} words")
 
+            # Build metadata with actual billed duration from Google
+            metadata = {
+                "total_words": len(word_details),
+                "model": self.model,
+                "language": "en-US",
+                "api_version": "v2"
+            }
+            
+            # Include actual billed duration from Google (if available)
+            if billed_duration_seconds is not None:
+                metadata["billed_duration_seconds"] = round(billed_duration_seconds, 2)
+                metadata["billed_duration_minutes"] = round(billed_duration_seconds / 60.0, 2)
+                logger.info(f"Including billed duration in metadata: {metadata['billed_duration_minutes']:.2f} minutes")
+
             return {
                 "success": True,
                 "transcript": full_transcript,
                 "confidence": avg_confidence,
                 "words": word_details,
-                "metadata": {
-                    "total_words": len(word_details),
-                    "model": self.model,
-                    "language": "en-US",
-                    "api_version": "v2"
-                }
+                "metadata": metadata
             }
 
         except Exception as e:

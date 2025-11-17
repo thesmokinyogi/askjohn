@@ -16,11 +16,13 @@
 
         .container {
             max-width: 1200px;
+            min-width: 900px;
             margin: 0 auto;
             background: white;
             border-radius: 20px;
             padding: 30px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow-x: auto;
         }
 
         .header {
@@ -58,6 +60,48 @@
             color: white;
         }
 
+        .btn-refresh {
+            font-size: 14px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-refresh:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-refresh:active {
+            transform: scale(0.98);
+        }
+
+        .btn-refresh.refreshing {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .btn-refresh.refreshing::before {
+            content: '';
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 4px;
+        }
+
         /* Stats Banner */
         .stats-banner {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -90,6 +134,7 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
+            table-layout: auto;
         }
 
         .library-table thead {
@@ -140,10 +185,10 @@
         .filename-cell {
             font-weight: 600;
             color: #333;
-            max-width: 300px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            min-width: 300px;
+            word-wrap: break-word;
+            word-break: break-word;
+            line-height: 1.4;
         }
 
         .date-cell {
@@ -278,6 +323,9 @@
         <div class="header">
             <h1>📚 Transcript Library</h1>
             <div class="nav-links">
+                <button class="btn-refresh" id="refreshBtn" onclick="refreshLibrary()" title="Refresh library">
+                    🔄 Refresh
+                </button>
                 <a href="/" class="btn-link">🏠 Home</a>
                 <a href="/static/jobs.html" class="btn-link">📋 Jobs</a>
             </div>
@@ -346,8 +394,14 @@
         }
 
         // Load library entries
-        async function loadLibrary() {
+        async function loadLibrary(showLoading = false) {
             try {
+                if (showLoading) {
+                    document.getElementById('loading').style.display = 'block';
+                    document.getElementById('library-container').style.display = 'none';
+                    document.getElementById('empty-state').style.display = 'none';
+                }
+
                 const response = await fetch('/api/library');
                 const data = await response.json();
 
@@ -379,6 +433,21 @@
                 console.error('Error loading library:', err);
                 document.getElementById('loading').style.display = 'none';
                 showToast('Error loading library: ' + err.message);
+            }
+        }
+
+        // Refresh library (with visual feedback)
+        async function refreshLibrary() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.classList.add('refreshing');
+            refreshBtn.disabled = true;
+
+            try {
+                await loadLibrary(true);
+                showToast('Library refreshed');
+            } finally {
+                refreshBtn.classList.remove('refreshing');
+                refreshBtn.disabled = false;
             }
         }
 

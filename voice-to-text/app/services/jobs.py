@@ -281,6 +281,7 @@ class JobStorageService:
             "gcs_uri": gcs_uri,  # Store for GCS result lookup
             "status": "queued",  # Initial state
             "submitted_at": datetime.now().isoformat(),
+            "processing_started_at": None,  # Track when processing actually starts (excludes queueing)
             "updated_at": datetime.now().isoformat(),
             # Results populated later when job completes
             "transcript": None,
@@ -440,7 +441,7 @@ class JobStorageService:
 
         # Delete transcript file if it exists
         if "transcript_file" in job:
-            transcript_path = self.data_dir / job["transcript_file"]
+            transcript_path = self.TRANSCRIPTS_DIR / job["transcript_file"]
             if transcript_path.exists():
                 transcript_path.unlink()
                 logger.info(f"Deleted transcript file: {job['transcript_file']}")

@@ -7,6 +7,9 @@ python-multipart==0.0.6  # For file uploads
 google-cloud-speech==2.21.0       # Speech-to-Text API
 google-cloud-storage==2.10.0      # Cloud Storage (required for V2 batch)
 
+# HTTP requests for REST API
+requests==2.31.0                   # For Speech V2 metadata discovery via REST API
+
 # Audio metadata extraction
 mutagen==1.47.0  # Server-side audio metadata (duration, format, codec)
 

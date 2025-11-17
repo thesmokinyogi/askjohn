@@ -479,12 +479,14 @@
                             <div class="detail-label">Cost</div>
                             <div class="detail-value">$${(job.estimated_cost || 0).toFixed(2)}</div>
                         </div>
-                        ${job.confidence ? `
                         <div class="detail-item">
                             <div class="detail-label">Confidence</div>
-                            <div class="detail-value">${Math.round(job.confidence * 100)}%</div>
+                            <div class="detail-value">
+                                ${job.confidence !== null && job.confidence !== undefined 
+                                    ? Math.round(job.confidence * 100) + '%' 
+                                    : '<span style="color: #9ca3af;">N/A</span>'}
+                            </div>
                         </div>
-                        ` : ''}
                     </div>
 
                     ${job.transcript ? `
@@ -578,8 +580,14 @@
                     const job = allJobs.find(j => j.job_id === jobId);
                     const duration = job ? job.duration_minutes : 0;
                     const model = job ? job.model : '';
-                    const estimatedTime = getEstimatedTime(duration, model);
-                    statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${estimatedTime}s. Check back in a minute.</em>`;
+                    // Get learned estimate from API
+                    getEstimatedTime(duration, model).then(estimatedTime => {
+                        statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${estimatedTime}s. Check back in a minute.</em>`;
+                    }).catch(err => {
+                        // Fallback to hardcoded
+                        const estimatedTime = getEstimatedTimeFallback(duration, model);
+                        statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${estimatedTime}s. Check back in a minute.</em>`;
+                    });
                     statusMsg.style.borderColor = '#2196F3';
                     checkBtn.disabled = false;
                     checkBtn.textContent = '🔄 Check Again';
@@ -598,8 +606,26 @@
             }
         }
 
-        // Estimate processing time (same logic as index.html)
-        function getEstimatedTime(durationMinutes, model) {
+        // Get estimated processing time from API (learned from historical data)
+        async function getEstimatedTime(durationMinutes, model) {
+            try {
+                const response = await fetch(
+                    `/api/estimate-processing-time?model=${encodeURIComponent(model)}&duration_minutes=${durationMinutes}`
+                );
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                const data = await response.json();
+                return data.estimated_seconds;
+            } catch (error) {
+                console.warn('Failed to get learned estimate:', error);
+                // Fallback to hardcoded estimate
+                return getEstimatedTimeFallback(durationMinutes, model);
+            }
+        }
+
+        // Fallback: Hardcoded estimates (used if API fails or no data available)
+        function getEstimatedTimeFallback(durationMinutes, model) {
             if (model.includes('batch')) {
                 return 45 + (durationMinutes * 5);
             } else {
