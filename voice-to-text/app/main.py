@@ -31,21 +31,24 @@ from app.services.jobs import get_job_storage
 from app.services.audio_metadata import get_audio_metadata_service
 from app.services.library import LibraryService
 
+# Import new API structure
+from app.api.v1 import api_router
+from app.api.v1.errors import register_error_handlers
+from app.config import get_config
+
 # Load environment variables from .env file
 load_dotenv()
 
+# Get configuration (using new Config class)
+config = get_config()
+
 # ===== TEST MODE CONFIGURATION =====
-# Set to True to skip upload and use cached file for faster testing
-TEST_MODE_SKIP_UPLOAD = os.getenv("TEST_MODE_SKIP_UPLOAD", "false").lower() == "true"
-TEST_GCS_URI = os.getenv("TEST_GCS_URI", "gs://voice-to-text-audio-jc/uploads/20251110_060326_Voice_Memo_-_2014-06-28_16_33_27_-_Chelsea_And_The_Magician.m4a")
-TEST_AUDIO_METADATA = {
-    'sample_rate': 44100,
-    'channels': 1,
-    'duration': 336.8,
-    'codec': 'aac',
-    'bit_rate': 'unknown'
-}
+# Using Config class (backward compatible variables below)
 # ===================================
+# Keep old variables for backward compatibility
+TEST_MODE_SKIP_UPLOAD = config.test_mode_skip_upload
+TEST_GCS_URI = config.test_gcs_uri
+TEST_AUDIO_METADATA = config.test_audio_metadata
 
 # Configure logging
 # Set up both console and file logging
@@ -91,16 +94,18 @@ static_path = Path(__file__).parent / "static"
 if static_path.exists():
     app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-# Get configuration from environment
-STT_PROVIDER = os.getenv("STT_PROVIDER", "google")
+# Register error handlers (must be before including routers)
+register_error_handlers(app)
 
-# Budget configuration
-MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET", "250.0"))
+# Include API v1 router
+app.include_router(api_router)
 
-# Provider-specific configuration
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "long")  # Renamed from STT_MODEL
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME")
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+# Get configuration values (using Config class, keeping old variable names for backward compatibility)
+STT_PROVIDER = config.stt_provider
+MONTHLY_BUDGET = config.monthly_budget
+GOOGLE_MODEL = config.google_model
+GCS_BUCKET_NAME = config.gcs_bucket_name
+GOOGLE_CLOUD_PROJECT = config.google_cloud_project
 
 # Initialize pricing, budget, job storage, library, and processing time services
 pricing_service = get_pricing_service()

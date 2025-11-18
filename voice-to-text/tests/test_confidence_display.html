@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Confidence Display</title>
+    <style>
+        .confidence {
+            background: #10b981;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+        .confidence.medium { background: #f59e0b; }
+        .confidence.low { background: #ef4444; }
+        .test-case {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .test-case h3 { margin-top: 0; }
+        .result { margin-top: 10px; font-weight: bold; }
+        .pass { color: green; }
+        .fail { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Confidence Display Test</h1>
+    
+    <div id="results"></div>
+
+    <script>
+        // Copy of the confidence display logic from index.html
+        function displayConfidence(data, testName) {
+            const confidenceEl = document.createElement('div');
+            confidenceEl.id = 'confidence';
+            confidenceEl.className = 'confidence';
+            
+            if (data.confidence !== null && data.confidence !== undefined) {
+                const confidence = Math.round(data.confidence * 100);
+                confidenceEl.textContent = `${confidence}% confident`;
+
+                if (confidence >= 90) {
+                    confidenceEl.className = 'confidence';
+                } else if (confidence >= 70) {
+                    confidenceEl.className = 'confidence medium';
+                } else {
+                    confidenceEl.className = 'confidence low';
+                }
+            } else {
+                // Confidence not available for this model (e.g., chirp)
+                confidenceEl.textContent = 'Confidence N/A';
+                confidenceEl.className = 'confidence medium';
+            }
+            
+            return confidenceEl;
+        }
+
+        // Test cases
+        const testCases = [
+            {
+                name: "Normal confidence (95%)",
+                data: { confidence: 0.95 },
+                expected: "95% confident",
+                expectedClass: "confidence"
+            },
+            {
+                name: "Medium confidence (75%)",
+                data: { confidence: 0.75 },
+                expected: "75% confident",
+                expectedClass: "confidence medium"
+            },
+            {
+                name: "Low confidence (50%)",
+                data: { confidence: 0.50 },
+                expected: "50% confident",
+                expectedClass: "confidence low"
+            },
+            {
+                name: "Zero confidence (0%)",
+                data: { confidence: 0.0 },
+                expected: "0% confident",
+                expectedClass: "confidence low"
+            },
+            {
+                name: "Null confidence (chirp - should show N/A)",
+                data: { confidence: null },
+                expected: "Confidence N/A",
+                expectedClass: "confidence medium"
+            },
+            {
+                name: "Undefined confidence (chirp - should show N/A)",
+                data: { confidence: undefined },
+                expected: "Confidence N/A",
+                expectedClass: "confidence medium"
+            },
+            {
+                name: "Missing confidence field (should show N/A)",
+                data: {},
+                expected: "Confidence N/A",
+                expectedClass: "confidence medium"
+            }
+        ];
+
+        const resultsDiv = document.getElementById('results');
+        
+        testCases.forEach((testCase, index) => {
+            const testDiv = document.createElement('div');
+            testDiv.className = 'test-case';
+            
+            const title = document.createElement('h3');
+            title.textContent = `Test ${index + 1}: ${testCase.name}`;
+            testDiv.appendChild(title);
+            
+            const resultEl = displayConfidence(testCase.data, testCase.name);
+            testDiv.appendChild(resultEl);
+            
+            const result = document.createElement('div');
+            result.className = 'result';
+            
+            const textMatch = resultEl.textContent === testCase.expected;
+            const classMatch = resultEl.className === testCase.expectedClass;
+            
+            if (textMatch && classMatch) {
+                result.className += ' pass';
+                result.textContent = '✓ PASS';
+            } else {
+                result.className += ' fail';
+                result.textContent = `✗ FAIL - Expected: "${testCase.expected}" (${testCase.expectedClass}), Got: "${resultEl.textContent}" (${resultEl.className})`;
+            }
+            
+            testDiv.appendChild(result);
+            resultsDiv.appendChild(testDiv);
+        });
+    </script>
+</body>
+</html>
+
