@@ -122,20 +122,32 @@ class TranscriptionOrchestrator:
         
         return file_extension, None
     
-    def map_model_name(self, ui_model: Optional[str]) -> str:
+    def map_model_name(self, ui_model: Optional[str]) -> Tuple[str, str, str]:
         """
-        Map UI model name to Google API model name.
+        Map UI model name to Google API model name and extract tier.
         
         Args:
             ui_model: UI model name (e.g., 'chirp_batch') or None
             
         Returns:
-            Google API model name (e.g., 'chirp')
+            Tuple of (google_api_model, selected_model, tier)
+            e.g., ('chirp', 'chirp_batch', 'batch')
         """
         selected_model = ui_model or self.default_model
         google_api_model = self.MODEL_MAPPING.get(selected_model, 'long')
-        logger.info(f"Model selection: UI={selected_model}, API={google_api_model}")
-        return google_api_model, selected_model
+        
+        # Extract tier from model name
+        if selected_model.endswith('_batch'):
+            tier = 'batch'
+        elif selected_model.endswith('_standard'):
+            tier = 'standard'
+        else:
+            # Default to batch for backward compatibility
+            tier = 'batch'
+            logger.warning(f"Model name '{selected_model}' doesn't specify tier, defaulting to 'batch'")
+        
+        logger.info(f"Model selection: UI={selected_model}, API={google_api_model}, Tier={tier}")
+        return google_api_model, selected_model, tier
     
     def submit_transcription(
         self,
@@ -185,8 +197,8 @@ class TranscriptionOrchestrator:
                 )
                 logger.info(f"Uploaded to: {gcs_uri}")
             
-            # Step 3: Map model name
-            google_api_model, selected_model = self.map_model_name(model)
+            # Step 3: Map model name and extract tier
+            google_api_model, selected_model, tier = self.map_model_name(model)
             
             # Step 4: Calculate estimated cost
             duration_minutes = audio_metadata.get('duration', 0) / 60.0
@@ -225,6 +237,7 @@ class TranscriptionOrchestrator:
                 job_id=job_id,
                 filename=filename,
                 model=selected_model,
+                tier=tier,
                 duration_minutes=duration_minutes,
                 estimated_cost=cost_estimate['total_cost'],
                 gcs_uri=gcs_uri

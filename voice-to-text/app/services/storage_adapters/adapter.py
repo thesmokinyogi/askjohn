@@ -20,8 +20,9 @@ class JobStorageAdapter(Protocol):
         job_id: str,
         filename: str,
         model: str,
-        duration_minutes: float,
-        estimated_cost: float,
+        tier: Optional[str] = None,
+        duration_minutes: float = 0,
+        estimated_cost: float = 0,
         gcs_uri: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a new job record."""

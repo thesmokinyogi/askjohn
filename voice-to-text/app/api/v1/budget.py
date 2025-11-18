@@ -140,6 +140,9 @@ async def estimate_cost(
             free_tier_remaining=free_tier_remaining
         )
         
+        # Add free_tier_remaining to response (required by response model)
+        estimate['free_tier_remaining'] = free_tier_remaining
+        
         logger.info(f"Cost estimate result: ${estimate['total_cost']:.2f} for {duration_minutes} minutes")
         
         return CostEstimateResponse(**estimate)

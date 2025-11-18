@@ -299,7 +299,18 @@ async def transcribe_audio(
     }
 
     google_api_model = model_mapping.get(selected_model, 'long')
-    logger.info(f"Model selection: UI={selected_model}, API={google_api_model}")
+    
+    # Extract tier from model name
+    if selected_model.endswith('_batch'):
+        tier = 'batch'
+    elif selected_model.endswith('_standard'):
+        tier = 'standard'
+    else:
+        # Default to batch for backward compatibility
+        tier = 'batch'
+        logger.warning(f"Model name '{selected_model}' doesn't specify tier, defaulting to 'batch'")
+    
+    logger.info(f"Model selection: UI={selected_model}, API={google_api_model}, Tier={tier}")
 
     # Validate file type
     allowed_extensions = ["mp3", "wav", "m4a", "ogg", "flac", "mp4", "mov"]
@@ -397,6 +408,7 @@ async def transcribe_audio(
             job_id=job_id,
             filename=file.filename,
             model=selected_model,
+            tier=tier,
             duration_minutes=duration_minutes,
             estimated_cost=cost_estimate['total_cost'],
             gcs_uri=gcs_uri  # Store for GCS result lookup

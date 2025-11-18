@@ -253,6 +253,7 @@ class JobStorageService:
         job_id: str,
         filename: str,
         model: str,
+        tier: str = None,
         duration_minutes: float = 0,
         estimated_cost: float = 0,
         gcs_uri: str = None
@@ -264,6 +265,7 @@ class JobStorageService:
             job_id: Google operation name (unique identifier)
             filename: Original audio filename
             model: Model used (e.g., 'chirp_batch', 'long_standard')
+            tier: Recognition tier ('batch' or 'standard')
             duration_minutes: Audio duration in minutes
             estimated_cost: Estimated transcription cost
             gcs_uri: GCS URI of audio file (needed for GCS result lookup)
@@ -276,6 +278,7 @@ class JobStorageService:
             "job_id": job_id,
             "filename": filename,
             "model": model,
+            "tier": tier,
             "duration_minutes": duration_minutes,
             "estimated_cost": estimated_cost,
             "gcs_uri": gcs_uri,  # Store for GCS result lookup

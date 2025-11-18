@@ -22,6 +22,7 @@ class JobModel(BaseModel):
     job_id: str = Field(..., description="Unique job identifier (Google operation name)")
     filename: str = Field(..., description="Original audio filename")
     model: str = Field(..., description="Model used for transcription")
+    tier: Optional[str] = Field(None, description="Recognition tier: 'batch' or 'standard'")
     status: JobStatus = Field(..., description="Current job status")
     submitted_at: datetime = Field(..., description="When job was submitted")
     

@@ -233,12 +233,16 @@ class ProcessingTimeService:
             model_estimate["rate_per_minute_seconds"] * audio_duration_minutes
         )
 
+        # Ensure rate_per_minute_seconds is non-negative (validation requirement)
+        rate_per_minute = max(0.0, model_estimate["rate_per_minute_seconds"])
+        
         return {
             "estimated_seconds": round(estimated_seconds, 1),
             "confidence": model_estimate["confidence"],
             "sample_count": model_estimate["sample_count"],
             "base_time_seconds": model_estimate["base_time_seconds"],
-            "rate_per_minute_seconds": model_estimate["rate_per_minute_seconds"]
+            "rate_per_minute_seconds": rate_per_minute,
+            "r_squared": model_estimate.get("r_squared", None)
         }
 
     def get_stats(self) -> Dict[str, Any]:
