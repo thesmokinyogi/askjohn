@@ -251,6 +251,85 @@
             text-transform: uppercase;
         }
 
+        /* Stereo File Detection Card */
+        .stereo-card {
+            background: #fff7ed;
+            border: 2px solid #fb923c;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(251, 146, 60, 0.15);
+        }
+
+        .stereo-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .stereo-icon {
+            font-size: 24px;
+        }
+
+        .stereo-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #c2410c;
+        }
+
+        .stereo-card-message {
+            color: #9a3412;
+            font-size: 14px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .stereo-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .stereo-option {
+            border: 2px solid #fed7aa;
+            border-radius: 8px;
+            padding: 12px 15px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .stereo-option:hover {
+            border-color: #fb923c;
+            background: #fff7ed;
+            transform: translateX(4px);
+        }
+
+        .stereo-option.selected {
+            border-color: #ea580c;
+            background: #ffedd5;
+            box-shadow: 0 2px 8px rgba(234, 88, 12, 0.2);
+        }
+
+        .stereo-option-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stereo-option-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: #c2410c;
+            margin-bottom: 4px;
+        }
+
+        .stereo-option-desc {
+            font-size: 12px;
+            color: #9a3412;
+            line-height: 1.4;
+        }
+
         /* Advanced Options */
         .advanced-section { margin-top: 15px; }
 
@@ -598,6 +677,43 @@
             </div>
         </div>
 
+        <!-- Stereo File Detection Card -->
+        <div class="stereo-card" id="stereoCard" style="display: none;">
+            <div class="stereo-card-header">
+                <span class="stereo-icon">🎵</span>
+                <span class="stereo-title">Stereo File Detected</span>
+            </div>
+            <div class="stereo-card-message">
+                Please select your options for voice transcription:
+            </div>
+            <div class="stereo-options" id="stereoOptions">
+                <div class="stereo-option channel-option selected" data-channel="none">
+                    <div class="stereo-option-content">
+                        <div class="stereo-option-name">All Channels (Default)</div>
+                        <div class="stereo-option-desc">Use all channels - no extraction</div>
+                    </div>
+                </div>
+                <div class="stereo-option channel-option" data-channel="auto">
+                    <div class="stereo-option-content">
+                        <div class="stereo-option-name">Auto-Detect</div>
+                        <div class="stereo-option-desc">Automatically detect which channel contains speech</div>
+                    </div>
+                </div>
+                <div class="stereo-option channel-option" data-channel="left">
+                    <div class="stereo-option-content">
+                        <div class="stereo-option-name">Left Channel</div>
+                        <div class="stereo-option-desc">Extract and transcribe left channel only</div>
+                    </div>
+                </div>
+                <div class="stereo-option channel-option" data-channel="right">
+                    <div class="stereo-option-content">
+                        <div class="stereo-option-name">Right Channel</div>
+                        <div class="stereo-option-desc">Extract and transcribe right channel only</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Advanced Options -->
         <div class="advanced-section">
             <div class="advanced-toggle" id="advancedToggle">
@@ -611,6 +727,7 @@
                     <div class="model-list" id="modelList">
                         <!-- Models loaded dynamically -->
                     </div>
+                    
                 </div>
             </div>
         </div>
@@ -668,6 +785,8 @@
         // Global state
         let selectedFile = null;
         let selectedModel = 'chirp_batch'; // Default model
+        let selectedChannel = null; // Channel selection: 'auto', 'left', 'right', or null (all channels)
+        let fileChannels = 1; // Number of channels in the selected file
         let pricingData = null;
         let budgetData = null;
         let fileDurationMinutes = 0;
@@ -696,6 +815,56 @@
             renderModels();
             updateModelIndicator(); // Show default model
             setupEventListeners();
+            
+            // Restore job status from localStorage if available
+            restoreJobStatus();
+        }
+        
+        // Restore job status after page refresh
+        async function restoreJobStatus() {
+            const savedJobId = localStorage.getItem('currentJobId');
+            console.log('Restoring job status, savedJobId:', savedJobId);
+            if (!savedJobId) {
+                console.log('No saved job ID found in localStorage');
+                return;
+            }
+            
+            try {
+                // Check if job still exists and get its status
+                console.log('Fetching job status for:', savedJobId);
+                const response = await fetch(`/api/jobs/${encodeURIComponent(savedJobId)}/status`);
+                if (!response.ok) {
+                    console.warn('Job status fetch failed, clearing localStorage');
+                    // Job not found or error - clear localStorage
+                    localStorage.removeItem('currentJobId');
+                    localStorage.removeItem('jobSubmittedAt');
+                    return;
+                }
+                
+                const data = await response.json();
+                console.log('Job status restored:', data.status, data);
+                
+                // Restore job state
+                currentJobId = savedJobId;
+                
+                // Display job status - use the full response data which has the correct format
+                displayJobStatus(data);
+                
+                // If job is still processing, resume polling
+                if (data.status === 'processing' || data.status === 'queued') {
+                    console.log('Resuming polling for job:', savedJobId);
+                    startPolling();
+                } else if (data.status === 'complete') {
+                    // Job completed - check status one more time to get results
+                    console.log('Job already complete, fetching results');
+                    checkJobStatus();
+                }
+            } catch (err) {
+                console.error('Error restoring job status:', err);
+                // Clear localStorage on error
+                localStorage.removeItem('currentJobId');
+                localStorage.removeItem('jobSubmittedAt');
+            }
         }
 
         // Load pricing from API
@@ -868,6 +1037,66 @@
             }
         }
 
+        // Select channel
+        function selectChannel(channelValue, clickedElement) {
+            // 'none' means use all channels (null)
+            selectedChannel = channelValue === 'none' ? null : channelValue;
+            document.querySelectorAll('.channel-option').forEach(el => el.classList.remove('selected'));
+            clickedElement.classList.add('selected');
+        }
+
+        // Show/hide channel selection based on file channels
+        function updateChannelSelectionVisibility() {
+            const stereoCard = document.getElementById('stereoCard');
+            
+            console.log('updateChannelSelectionVisibility called:', {
+                fileChannels,
+                stereoCard: !!stereoCard
+            });
+            
+            if (!stereoCard) {
+                console.error('Stereo card element not found!');
+                return;
+            }
+            
+            if (fileChannels > 1) {
+                // Stereo file - show stereo card
+                console.log('Showing stereo card for stereo file');
+                stereoCard.style.display = 'block';
+                
+                // Reset to "All Channels" if a channel was previously selected
+                if (selectedChannel !== null) {
+                    selectedChannel = null;
+                    document.querySelectorAll('.channel-option').forEach(el => {
+                        el.classList.remove('selected');
+                        if (el.getAttribute('data-channel') === 'none') {
+                            el.classList.add('selected');
+                        }
+                    });
+                }
+                
+                // Set up event listeners for channel options (if not already set)
+                const stereoOptions = document.querySelectorAll('#stereoOptions .channel-option');
+                stereoOptions.forEach(option => {
+                    // Remove existing listeners by cloning (clean way to reset)
+                    const newOption = option.cloneNode(true);
+                    option.parentNode.replaceChild(newOption, option);
+                    
+                    // Add click listener
+                    newOption.addEventListener('click', function() {
+                        const channelValue = this.getAttribute('data-channel');
+                        selectChannel(channelValue, this);
+                    });
+                });
+            } else {
+                // Mono file - hide stereo card
+                console.log('Hiding stereo card for mono file');
+                stereoCard.style.display = 'none';
+                // Reset channel selection
+                selectedChannel = null;
+            }
+        }
+
         // Update model indicator display
         function updateModelIndicator() {
             if (!pricingData) return;
@@ -945,6 +1174,9 @@
                 toggleIcon.classList.toggle('expanded');
             });
 
+            // Channel selection event listeners (for stereo card)
+            // Note: We'll set these up dynamically when the stereo card appears
+
             // Transcribe button
             transcribeBtn.addEventListener('click', transcribeAudio);
         }
@@ -970,9 +1202,20 @@
 
                 // Store duration in minutes
                 fileDurationMinutes = metadata.duration_minutes;
+                
+                // Store channel count (default to 1 if missing or null)
+                fileChannels = metadata.channels != null ? metadata.channels : 1;
+                console.log('Channel detection:', {
+                    raw: metadata.channels,
+                    parsed: fileChannels,
+                    type: typeof metadata.channels
+                });
 
                 console.log(`Duration detected: ${fileDurationMinutes.toFixed(1)} minutes`);
-                console.log(`Format: ${metadata.format}, Codec: ${metadata.codec}`);
+                console.log(`Format: ${metadata.format}, Codec: ${metadata.codec}, Channels: ${fileChannels}`);
+
+                // Show/hide channel selection based on file channels
+                updateChannelSelectionVisibility();
 
                 // Update cost estimate
                 updateCostEstimate();
@@ -1060,6 +1303,10 @@
             const formData = new FormData();
             formData.append('file', selectedFile);
             formData.append('model', selectedModel);
+            // Add channel parameter if selected (null means all channels, which is default)
+            if (selectedChannel !== null) {
+                formData.append('channel', selectedChannel);
+            }
 
             try {
                 // Submit job (returns immediately with job_id)
@@ -1089,6 +1336,10 @@
                 // Job submitted successfully!
                 // data contains: job_id, status, filename, model, estimated_cost
                 currentJobId = data.job_id;
+                
+                // Save to localStorage so job status persists after refresh
+                localStorage.setItem('currentJobId', currentJobId);
+                localStorage.setItem('jobSubmittedAt', new Date().toISOString());
 
                 // Hide loading, show job status
                 loading.classList.remove('active');
@@ -1114,21 +1365,47 @@
             const jobStatus = document.getElementById('jobStatus');
             const jobId = document.getElementById('jobId');
             const jobMessage = document.getElementById('jobMessage');
+            
+            // Make sure job status is visible
+            jobStatus.classList.add('active');
+            
+            // Ensure we have job_id - use job_id from data or currentJobId
+            const job_id = jobData.job_id || currentJobId || 'Unknown';
 
-            // Show job ID (truncated for display)
-            const shortId = jobData.job_id.split('/').pop(); // Get last part
-            jobId.textContent = `Job ID: ${shortId}`;
-            jobId.title = jobData.job_id; // Full ID on hover
+            // Handle job ID display based on status
+            if (jobData.status === 'queued') {
+                // For queued jobs, show "Job Pending - {filename}"
+                jobId.textContent = `Job Pending - ${jobData.filename || 'Unknown'}`;
+                jobId.title = job_id; // Full ID on hover
+            } else {
+                // For other jobs, show truncated job ID
+                const shortId = job_id.includes('/') 
+                    ? job_id.split('/').pop() 
+                    : job_id.substring(0, 12) + '...';
+                jobId.textContent = `Job ID: ${shortId}`;
+                jobId.title = job_id; // Full ID on hover
+            }
 
             // Show initial message
-            jobMessage.innerHTML = `
-                <strong>Status:</strong> ${jobData.status}<br>
-                <strong>File:</strong> ${jobData.filename}<br>
-                <strong>Model:</strong> ${jobData.model}<br>
-                <strong>Estimated Cost:</strong> $${jobData.estimated_cost.toFixed(2)}<br>
-                <br>
-                <em>Checking status automatically (adaptive intervals)...</em>
-            `;
+            if (jobData.status === 'queued') {
+                // For queued jobs, show minimal info with message
+                jobMessage.innerHTML = `
+                    <strong>Status:</strong> ${jobData.status}<br>
+                    <strong>File:</strong> ${jobData.filename}<br>
+                    <strong>Model:</strong> ${jobData.model || 'Pending'}<br>
+                    ${jobData.message ? `<br><em>${jobData.message}</em>` : ''}
+                `;
+            } else {
+                // For other jobs, show full info
+                jobMessage.innerHTML = `
+                    <strong>Status:</strong> ${jobData.status}<br>
+                    <strong>File:</strong> ${jobData.filename}<br>
+                    <strong>Model:</strong> ${jobData.model}<br>
+                    <strong>Estimated Cost:</strong> $${(jobData.estimated_cost || 0).toFixed(2)}<br>
+                    <br>
+                    <em>Checking status automatically (adaptive intervals)...</em>
+                `;
+            }
 
             jobStatus.classList.add('active');
         }
@@ -1185,6 +1462,9 @@
                 // If job is complete, stop polling and show results
                 if (data.status === 'complete') {
                     stopPolling();
+                    // Clear localStorage when job completes
+                    localStorage.removeItem('currentJobId');
+                    localStorage.removeItem('jobSubmittedAt');
                     displayResults(data);
                     await loadBudget(); // Reload budget
                 }
@@ -1192,6 +1472,9 @@
                 // If job failed, stop polling and show error
                 if (data.status === 'failed') {
                     stopPolling();
+                    // Clear localStorage when job fails
+                    localStorage.removeItem('currentJobId');
+                    localStorage.removeItem('jobSubmittedAt');
                     showError(data.error || 'Transcription failed');
                     document.getElementById('jobStatus').classList.remove('active');
                 }
@@ -1283,18 +1566,33 @@
         }
 
         // Generate intelligent progress message
+        // Format seconds as "X min Y sec" (human-readable)
+        function formatTime(seconds) {
+            const totalSeconds = Math.round(seconds);
+            const minutes = Math.floor(totalSeconds / 60);
+            const secs = totalSeconds % 60;
+            
+            if (minutes === 0) {
+                return `${secs} sec`;
+            } else if (secs === 0) {
+                return `${minutes} min`;
+            } else {
+                return `${minutes} min ${secs} sec`;
+            }
+        }
+
         function getProgressMessage(elapsedSeconds, estimatedSeconds, model) {
             if (elapsedSeconds === 0) {
-                return `Google is transcribing your audio. Expected time: ~${Math.round(estimatedSeconds)}s`;
+                return `Google is transcribing your audio. Expected time: ~${formatTime(estimatedSeconds)}`;
             }
-
+            
             const remaining = Math.max(0, estimatedSeconds - elapsedSeconds);
             const percentComplete = Math.min(95, Math.round((elapsedSeconds / estimatedSeconds) * 100));
-
+            
             if (elapsedSeconds < 10) {
-                return `Starting transcription... (~${Math.round(estimatedSeconds)}s estimated)`;
+                return `Starting transcription... (~${formatTime(estimatedSeconds)} estimated)`;
             } else if (remaining > 10) {
-                return `Processing (${percentComplete}% estimated)... ~${Math.round(remaining)}s remaining`;
+                return `Processing (${percentComplete}% estimated)... ~${formatTime(remaining)} remaining`;
             } else if (remaining > 0) {
                 return `Almost done! Should complete any moment...`;
             } else {

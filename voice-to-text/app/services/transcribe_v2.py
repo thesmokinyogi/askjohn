@@ -126,6 +126,9 @@ _FEATURE_CACHE: Dict[tuple, Set[str]] = {}
 # Cache loaded flag
 _CACHE_LOADED = False
 
+# Metadata readiness flag (for request queuing)
+_METADATA_READY = False
+
 # ============================================================================
 # FEATURE MAPPING TABLE
 # ============================================================================
@@ -357,6 +360,7 @@ def initialize_metadata_cache(project_id: str, languages: list[str] = None) -> b
             _AVAILABLE_MODELS = metadata['models_by_location']
             _FEATURE_CACHE = metadata['features_by_model']
             _CACHE_LOADED = True
+            _METADATA_READY = True  # Mark metadata as ready for request processing
 
             # Log summary
             logger.info(f"✓ Metadata cache initialized successfully")
@@ -396,6 +400,17 @@ def initialize_metadata_cache(project_id: str, languages: list[str] = None) -> b
                 return False
 
     return False
+
+
+def is_metadata_ready() -> bool:
+    """
+    Check if metadata discovery is complete and system is ready to process requests.
+    
+    Returns:
+        bool: True if metadata is ready, False if still discovering
+    """
+    global _METADATA_READY
+    return _METADATA_READY
 
 
 # ============================================================================
@@ -1182,13 +1197,21 @@ class GoogleSpeechV2Service:
 
         except Exception as e:
             logger.error(f"Transcription error: {e}")
+            # Return minimal valid metadata model even on error
+            from app.models.transcript import TranscriptMetadata
+            error_metadata = TranscriptMetadata(
+                total_words=0,
+                model=self.model,
+                language="en-US",
+                api_version="v2"
+            )
             return {
                 "success": False,
                 "error": str(e),
                 "transcript": "",
                 "confidence": 0.0,
                 "words": [],
-                "metadata": {"error_type": "transcription_error"}
+                "metadata": error_metadata  # Return model, not dict
             }
 
     def _build_config(self, language_code: str, audio_encoding: str = None, audio_metadata: Optional[Dict] = None) -> cloud_speech.RecognitionConfig:
@@ -1368,12 +1391,20 @@ class GoogleSpeechV2Service:
                 segments = results_json['results']
             else:
                 logger.error(f"Unexpected JSON structure: {type(results_json)}")
+                # Return minimal valid metadata model even on error
+                from app.models.transcript import TranscriptMetadata
+                error_metadata = TranscriptMetadata(
+                    total_words=0,
+                    model=self.model,
+                    language="en-US",
+                    api_version="v2"
+                )
                 return {
                     "success": False,
                     "transcript": "",
                     "confidence": None,
                     "words": [],
-                    "metadata": {},
+                    "metadata": error_metadata,  # Return model, not empty dict
                     "error": "Unexpected JSON structure"
                 }
             
@@ -1480,34 +1511,43 @@ class GoogleSpeechV2Service:
             else:
                 logger.info("Confidence not available for this model")
             
-            # Build metadata
-            metadata = {
-                "total_words": len(word_details),
-                "model": self.model,
-                "language": "en-US",
-                "api_version": "v2"
-            }
+            # Build metadata using unified schema - return model directly
+            from app.models.transcript import TranscriptMetadata
             
-            if billed_duration_seconds is not None:
-                metadata["billed_duration_seconds"] = round(billed_duration_seconds, 2)
-                metadata["billed_duration_minutes"] = round(billed_duration_seconds / 60.0, 2)
+            metadata_model = TranscriptMetadata(
+                total_words=len(word_details),
+                model=self.model,
+                language="en-US",
+                api_version="v2",
+                billed_duration_seconds=round(billed_duration_seconds, 2) if billed_duration_seconds is not None else None,
+                billed_duration_minutes=round(billed_duration_seconds / 60.0, 2) if billed_duration_seconds is not None else None
+            )
             
+            # Return model directly (no conversion to dict)
             return {
                 "success": True,
                 "transcript": full_transcript,
                 "confidence": avg_confidence,
                 "words": word_details,
-                "metadata": metadata
+                "metadata": metadata_model  # Return model, not dict
             }
             
         except Exception as e:
             logger.error(f"Error parsing batch results from JSON: {e}", exc_info=True)
+            # Return minimal valid metadata model even on error
+            from app.models.transcript import TranscriptMetadata
+            error_metadata = TranscriptMetadata(
+                total_words=0,
+                model=self.model,
+                language="en-US",
+                api_version="v2"
+            )
             return {
                 "success": False,
                 "transcript": "",
                 "confidence": None,
                 "words": [],
-                "metadata": {},
+                "metadata": error_metadata,  # Return model, not empty dict
                 "error": f"Result parsing error: {e}"
             }
 
@@ -1628,37 +1668,46 @@ class GoogleSpeechV2Service:
 
             logger.info(f"Parsed {len(results)} result segments, {len(word_details)} words")
 
-            # Build metadata with actual billed duration from Google
-            metadata = {
-                "total_words": len(word_details),
-                "model": self.model,
-                "language": "en-US",
-                "api_version": "v2"
-            }
+            # Build metadata using unified schema - return model directly
+            from app.models.transcript import TranscriptMetadata
             
-            # Include actual billed duration from Google (if available)
+            metadata_model = TranscriptMetadata(
+                total_words=len(word_details),
+                model=self.model,
+                language="en-US",
+                api_version="v2",
+                billed_duration_seconds=round(billed_duration_seconds, 2) if billed_duration_seconds is not None else None,
+                billed_duration_minutes=round(billed_duration_seconds / 60.0, 2) if billed_duration_seconds is not None else None
+            )
+            
             if billed_duration_seconds is not None:
-                metadata["billed_duration_seconds"] = round(billed_duration_seconds, 2)
-                metadata["billed_duration_minutes"] = round(billed_duration_seconds / 60.0, 2)
-                logger.info(f"Including billed duration in metadata: {metadata['billed_duration_minutes']:.2f} minutes")
+                logger.info(f"Including billed duration in metadata: {metadata_model.billed_duration_minutes:.2f} minutes")
 
             return {
                 "success": True,
                 "transcript": full_transcript,
                 "confidence": avg_confidence,
                 "words": word_details,
-                "metadata": metadata
+                "metadata": metadata_model  # Return model, not dict
             }
 
         except Exception as e:
             logger.error(f"Error parsing results: {e}", exc_info=True)
+            # Return minimal valid metadata model even on error
+            from app.models.transcript import TranscriptMetadata
+            error_metadata = TranscriptMetadata(
+                total_words=0,
+                model=self.model,
+                language="en-US",
+                api_version="v2"
+            )
             return {
                 "success": False,
                 "error": f"Result parsing error: {str(e)}",
                 "transcript": "",
                 "confidence": 0.0,
                 "words": [],
-                "metadata": {"error_type": "parsing_error"}
+                "metadata": error_metadata  # Return model, not dict
             }
 
 

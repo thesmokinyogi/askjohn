@@ -16,6 +16,7 @@ import logging
 import tempfile
 import glob
 import time
+import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -38,6 +39,7 @@ from app.services.library import LibraryService
 from app.api.v1 import api_router
 from app.api.v1.errors import register_error_handlers
 from app.config import get_config
+from app.models.responses import JobStatusResponse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -218,6 +220,154 @@ def cleanup_orphaned_temp_files():
         logger.debug("No orphaned temp files found to clean up")
 
 
+async def discover_metadata_background(project_id: str, languages: list[str]):
+    """
+    Background task to discover metadata without blocking server startup.
+    
+    Runs the synchronous initialize_metadata_cache() in a thread pool executor
+    to avoid blocking the event loop. The server can accept requests immediately
+    using fallback configuration until discovery completes.
+    """
+    logger.info("Starting background metadata discovery...")
+    logger.info("  Server is ready to accept requests - using fallback configuration until discovery completes")
+    
+    # Run sync function in thread pool to avoid blocking event loop
+    cache_loaded = await asyncio.to_thread(
+        initialize_metadata_cache,
+        project_id=project_id,
+        languages=languages
+    )
+    
+    if cache_loaded:
+        logger.info("✓ Background metadata discovery complete - using dynamic configuration")
+        
+        # Log what we discovered for this location
+        available_locs = get_available_locations()
+        logger.info(f"  Discovered {len(available_locs)} Speech V2 locations")
+        
+        if SPEECH_LOCATION in available_locs:
+            logger.info(f"  ✓ Current location '{SPEECH_LOCATION}' is supported")
+        else:
+            logger.warning(f"  ⚠️  Current location '{SPEECH_LOCATION}' not in discovered locations")
+            logger.warning(f"     Available: {sorted(available_locs)}")
+        
+        # Log available models for our location
+        available_models = get_available_models(SPEECH_LOCATION, 'en-US')
+        if available_models:
+            logger.info(f"  Available models for {SPEECH_LOCATION}/en-US: {sorted(available_models)}")
+        else:
+            logger.warning(f"  ⚠️  No models found for {SPEECH_LOCATION}/en-US")
+        
+        # Start processing queued requests
+        from app.services.request_queue import get_request_queue
+        from app.services.orchestrator import TranscriptionOrchestrator
+        from app.dependencies import get_orchestrator
+        
+        queue_service = get_request_queue()
+        if queue_service.size() > 0:
+            logger.info(f"Starting queue processor - {queue_service.size()} requests queued")
+            asyncio.create_task(process_request_queue())
+        else:
+            logger.info("No queued requests to process")
+    else:
+        # Discovery failed - fallback is active, system is still ready to process
+        logger.warning("⚠️  Background metadata discovery failed - using fallback configuration")
+        logger.warning("   System is ready to process requests (using fallback config)")
+        
+        # Mark metadata as ready (fallback is active)
+        # Set _METADATA_READY = True when fallback is active
+        import app.services.transcribe_v2 as transcribe_v2_module
+        transcribe_v2_module._METADATA_READY = True
+        logger.info("✓ Metadata ready (fallback mode) - processing queued requests")
+        
+        # Start processing queued requests (will use fallback config)
+        from app.services.request_queue import get_request_queue
+        
+        queue_service = get_request_queue()
+        if queue_service.size() > 0:
+            logger.info(f"Starting queue processor - {queue_service.size()} requests queued")
+            asyncio.create_task(process_request_queue())
+        else:
+            logger.info("No queued requests to process")
+
+
+async def process_request_queue():
+    """
+    Process queued transcription requests once metadata is ready.
+    
+    This background task processes all requests that were queued
+    while metadata discovery was in progress.
+    """
+    from app.services.request_queue import get_request_queue
+    from app.dependencies import get_orchestrator
+    
+    queue_service = get_request_queue()
+    orchestrator = get_orchestrator()
+    queue_service.start_processing()
+    
+    logger.info(f"Queue processor started - processing {queue_service.size()} queued requests")
+    
+    processed_count = 0
+    error_count = 0
+    
+    while not queue_service.is_empty():
+        try:
+            # Get next queued request
+            queued_request = await queue_service.dequeue()
+            if not queued_request:
+                break
+            
+            logger.info(f"Processing queued request: {queued_request.request_id} (job_id={queued_request.job_id}, filename={queued_request.filename})")
+            
+            # Process the transcription (update existing job record)
+            try:
+                result = orchestrator.submit_transcription_from_file(
+                    file_path=queued_request.file_path,
+                    filename=queued_request.filename,
+                    model=queued_request.model,
+                    existing_job_id=queued_request.job_id  # Update existing job record
+                )
+                processed_count += 1
+                logger.info(f"✓ Successfully processed queued request: {queued_request.request_id} (job_id={queued_request.job_id})")
+                
+            except Exception as e:
+                error_count += 1
+                logger.error(f"✗ Error processing queued request {queued_request.request_id} (job_id={queued_request.job_id}): {e}", exc_info=True)
+                
+                # Update job record to indicate processing failed
+                # Keep job in "queued" status so it can be retried manually or by another service
+                try:
+                    from app.services.jobs import get_job_storage
+                    job_storage = get_job_storage()
+                    job_storage.update_job(queued_request.job_id, {
+                        "status": "queued",  # Keep as queued for retry
+                        "error": f"Processing failed: {str(e)}",
+                        "updated_at": datetime.now().isoformat()
+                    })
+                    logger.info(f"Job {queued_request.job_id} kept in queue for manual retry")
+                except Exception as update_error:
+                    logger.error(f"Failed to update job record for failed request: {update_error}", exc_info=True)
+                
+                # Don't clean up temp file - keep it for retry
+                # (Another service or manual retry might need it)
+                logger.info(f"Temp file preserved for retry: {queued_request.file_path}")
+            else:
+                # Success - clean up temp file
+                if os.path.exists(queued_request.file_path):
+                    try:
+                        os.unlink(queued_request.file_path)
+                        logger.debug(f"Cleaned up temp file: {queued_request.file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up temp file {queued_request.file_path}: {e}")
+        
+        except Exception as e:
+            logger.error(f"Error in queue processor: {e}", exc_info=True)
+            error_count += 1
+    
+    queue_service.stop_processing()
+    logger.info(f"Queue processor completed - processed: {processed_count}, errors: {error_count}")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Verify services on startup."""
@@ -232,38 +382,18 @@ async def startup_event():
             logger.error(f"Cannot access GCS bucket: {GCS_BUCKET_NAME}")
             logger.error("Please verify bucket exists and credentials are correct")
 
-        # Discover all available Speech V2 metadata from Locations API
-        # This is the single source of truth for regions, models, and features
-        logger.info("Discovering Speech V2 metadata from Locations API...")
-
+        # Start metadata discovery in background (non-blocking)
+        # Server can accept requests immediately using fallback data
+        # Discovery will complete in background and update cache when done
         primary_languages = ['en-US']
-
-        cache_loaded = initialize_metadata_cache(
-            project_id=GOOGLE_CLOUD_PROJECT,
-            languages=primary_languages
+        
+        # Start background task - server will accept requests immediately
+        asyncio.create_task(
+            discover_metadata_background(
+                project_id=GOOGLE_CLOUD_PROJECT,
+                languages=primary_languages
+            )
         )
-
-        if cache_loaded:
-            logger.info("✓ Metadata discovery complete - using dynamic configuration")
-
-            # Log what we discovered for this location
-            available_locs = get_available_locations()
-            logger.info(f"  Discovered {len(available_locs)} Speech V2 locations")
-
-            if SPEECH_LOCATION in available_locs:
-                logger.info(f"  ✓ Current location '{SPEECH_LOCATION}' is supported")
-            else:
-                logger.warning(f"  ⚠️  Current location '{SPEECH_LOCATION}' not in discovered locations")
-                logger.warning(f"     Available: {sorted(available_locs)}")
-
-            # Log available models for our location
-            available_models = get_available_models(SPEECH_LOCATION, 'en-US')
-            if available_models:
-                logger.info(f"  Models available in {SPEECH_LOCATION}: {sorted(available_models)}")
-            else:
-                logger.warning(f"  No models found for {SPEECH_LOCATION}/en-US")
-        else:
-            logger.warning("⚠️  Metadata discovery failed - using hardcoded fallback")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -317,7 +447,8 @@ async def health_check():
 @app.post("/transcribe")
 async def transcribe_audio(
     file: UploadFile = File(...),
-    model: str = Form(None)
+    model: str = Form(None),
+    channel: str = Form(None)
 ):
     """
     Submit a transcription job and return immediately with job ID.
@@ -333,6 +464,10 @@ async def transcribe_audio(
     Args:
         file: Audio file to transcribe
         model: Model to use (e.g., 'chirp_batch', 'long_standard')
+        channel: Optional channel selection for stereo files:
+                - "left" or "0": Extract left channel only
+                - "right" or "1": Extract right channel only
+                - None or "auto": Use all channels (default)
 
     Returns:
         {
@@ -428,8 +563,9 @@ async def transcribe_audio(
             audio_metadata = TEST_AUDIO_METADATA
         else:
             # Normal mode: Upload to GCS and extract metadata (streaming from disk)
+            logger.info(f"Main endpoint received channel parameter: {channel} (type: {type(channel).__name__})")
             logger.info("Uploading to Cloud Storage (streaming from disk)...")
-            gcs_uri, audio_metadata = storage_service.upload_audio_from_file(temp_path, file.filename)
+            gcs_uri, audio_metadata = storage_service.upload_audio_from_file(temp_path, file.filename, channel=channel)
             logger.info(f"Uploaded to: {gcs_uri}")
 
         # ===== STEP 3: Calculate estimated cost =====
@@ -486,7 +622,8 @@ async def transcribe_audio(
             tier=tier,
             duration_minutes=duration_minutes,
             estimated_cost=cost_estimate['total_cost'],
-            gcs_uri=gcs_uri  # Store for GCS result lookup
+            gcs_uri=gcs_uri,  # Store for GCS result lookup
+            channel=channel  # Store channel selection for stereo files
         )
 
         # ===== STEP 6: Return immediately =====
@@ -528,7 +665,7 @@ async def transcribe_audio(
                 logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
 
 
-@app.get("/api/jobs/{job_id:path}/status")
+@app.get("/api/jobs/{job_id:path}/status", response_model=JobStatusResponse)
 async def check_job_status(job_id: str):
     """
     Check the status of a transcription job.
@@ -577,30 +714,32 @@ async def check_job_status(job_id: str):
             # For completed jobs, load the transcript from file
             if job_record["status"] == "complete":
                 job_with_transcript = job_storage.get_job(job_id, include_transcript=True)
-                return JSONResponse(content={
-                    "job_id": job_id,
-                    "status": job_with_transcript["status"],
-                    "in_library": job_with_transcript.get("in_library", False),
-                    "library_id": job_with_transcript.get("library_id"),
-                    "filename": job_with_transcript["filename"],
-                    "model": job_with_transcript["model"],
-                    "submitted_at": job_with_transcript["submitted_at"],
-                    "completed_at": job_with_transcript.get("completed_at"),
-                    "transcript": job_with_transcript.get("transcript"),  # Loaded from file
-                    "confidence": job_with_transcript.get("confidence"),
-                    "actual_cost": job_with_transcript.get("actual_cost")
-                })
+                return JobStatusResponse(
+                    job_id=job_id,
+                    status=job_with_transcript["status"],
+                    in_library=job_with_transcript.get("in_library", False),
+                    library_id=job_with_transcript.get("library_id"),
+                    filename=job_with_transcript["filename"],
+                    model=job_with_transcript["model"],
+                    submitted_at=job_with_transcript["submitted_at"],
+                    completed_at=job_with_transcript.get("completed_at"),
+                    transcript=job_with_transcript.get("transcript"),  # Loaded from file
+                    confidence=job_with_transcript.get("confidence"),
+                    actual_cost=job_with_transcript.get("actual_cost"),
+                    metadata=None  # Metadata is in transcript file, not loaded here for performance
+                )
 
             # For failed jobs, just return error
-            return JSONResponse(content={
-                "job_id": job_id,
-                "status": job_record["status"],
-                "filename": job_record["filename"],
-                "model": job_record["model"],
-                "submitted_at": job_record["submitted_at"],
-                "completed_at": job_record.get("completed_at"),
-                "error": job_record.get("error")
-            })
+            return JobStatusResponse(
+                job_id=job_id,
+                status=job_record["status"],
+                filename=job_record["filename"],
+                model=job_record["model"],
+                submitted_at=job_record["submitted_at"],
+                completed_at=job_record.get("completed_at"),
+                error=job_record.get("error"),
+                metadata=None
+            )
 
         # Job is still in progress - check Google for updates
         logger.info(f"Checking Google operation status for job {job_id}")
@@ -633,29 +772,31 @@ async def check_job_status(job_id: str):
                 # Return the already-processed result
                 if updated_job_record["status"] == "complete":
                     job_with_transcript = job_storage.get_job(job_id, include_transcript=True)
-                    return JSONResponse(content={
-                        "job_id": job_id,
-                        "status": job_with_transcript["status"],
-                        "in_library": job_with_transcript.get("in_library", False),
-                        "library_id": job_with_transcript.get("library_id"),
-                        "filename": job_with_transcript["filename"],
-                        "model": job_with_transcript["model"],
-                        "submitted_at": job_with_transcript["submitted_at"],
-                        "completed_at": job_with_transcript.get("completed_at"),
-                        "transcript": job_with_transcript.get("transcript"),
-                        "confidence": job_with_transcript.get("confidence"),
-                        "actual_cost": job_with_transcript.get("actual_cost")
-                    })
+                    return JobStatusResponse(
+                        job_id=job_id,
+                        status=job_with_transcript["status"],
+                        in_library=job_with_transcript.get("in_library", False),
+                        library_id=job_with_transcript.get("library_id"),
+                        filename=job_with_transcript["filename"],
+                        model=job_with_transcript["model"],
+                        submitted_at=job_with_transcript["submitted_at"],
+                        completed_at=job_with_transcript.get("completed_at"),
+                        transcript=job_with_transcript.get("transcript"),
+                        confidence=job_with_transcript.get("confidence"),
+                        actual_cost=job_with_transcript.get("actual_cost"),
+                        metadata=None  # Metadata is in transcript file, not loaded here for performance
+                    )
                 else:
-                    return JSONResponse(content={
-                        "job_id": job_id,
-                        "status": updated_job_record["status"],
-                        "filename": updated_job_record["filename"],
-                        "model": updated_job_record["model"],
-                        "submitted_at": updated_job_record["submitted_at"],
-                        "completed_at": updated_job_record.get("completed_at"),
-                        "error": updated_job_record.get("error")
-                    })
+                    return JobStatusResponse(
+                        job_id=job_id,
+                        status=updated_job_record["status"],
+                        filename=updated_job_record["filename"],
+                        model=updated_job_record["model"],
+                        submitted_at=updated_job_record["submitted_at"],
+                        completed_at=updated_job_record.get("completed_at"),
+                        error=updated_job_record.get("error"),
+                        metadata=None
+                    )
 
             # Job finished (either successfully or with error)
 
@@ -665,8 +806,18 @@ async def check_job_status(job_id: str):
 
                 # Calculate actual cost and free minutes from billed duration
                 # Use actual billed duration from Google's API response (not estimated)
-                metadata = status_result.get("metadata", {})
-                billed_duration_minutes = metadata.get("billed_duration_minutes")
+                # Handle both TranscriptMetadata model and dict
+                from app.models.transcript import TranscriptMetadata
+                metadata = status_result.get("metadata")
+                if isinstance(metadata, TranscriptMetadata):
+                    # Pydantic model - use attribute access
+                    billed_duration_minutes = metadata.billed_duration_minutes
+                elif isinstance(metadata, dict):
+                    # Dict - use .get()
+                    billed_duration_minutes = metadata.get("billed_duration_minutes")
+                else:
+                    # None or unexpected type
+                    billed_duration_minutes = None
                 
                 # Fall back to estimated duration if Google didn't provide billed duration
                 if billed_duration_minutes is None:
@@ -693,10 +844,20 @@ async def check_job_status(job_id: str):
                     actual_cost = job_record["estimated_cost"]
 
                 # Update job record in storage
-                # Include words in metadata for post-processing
-                metadata = status_result.get("metadata", {}).copy()
-                if "words" in status_result:
-                    metadata["words"] = status_result["words"]
+                # metadata is a TranscriptMetadata model - pass it directly
+                # Words are handled separately in status_result
+                metadata = status_result.get("metadata")
+                
+                # Include channel from job record in metadata if not already present
+                if isinstance(metadata, TranscriptMetadata):
+                    if metadata.channel is None and job_record.get("channel"):
+                        # Create new metadata with channel from job record
+                        metadata_dict = metadata.model_dump()
+                        metadata_dict["channel"] = job_record.get("channel")
+                        metadata = TranscriptMetadata(**metadata_dict)
+                elif isinstance(metadata, dict):
+                    if metadata.get("channel") is None and job_record.get("channel"):
+                        metadata["channel"] = job_record.get("channel")
                 
                 job_storage.mark_complete(
                     job_id=job_id,
@@ -780,20 +941,24 @@ async def check_job_status(job_id: str):
                     logger.info(f"Added job {job_id} to library as {library_id}")
 
                 # Return complete result
-                return JSONResponse(content={
-                    "job_id": job_id,
-                    "status": "complete",
-                    "in_library": True,
-                    "library_id": library_id,
-                    "filename": job_record["filename"],
-                    "model": job_record["model"],
-                    "submitted_at": job_record["submitted_at"],
-                    "completed_at": datetime.now().isoformat(),
-                    "transcript": status_result["transcript"],
-                    "confidence": status_result["confidence"],
-                    "actual_cost": actual_cost,
-                    "metadata": status_result.get("metadata")
-                })
+                # metadata is already a TranscriptMetadata model from status_result
+                # FastAPI will automatically serialize it when we return JobStatusResponse
+                metadata = status_result.get("metadata")
+                
+                return JobStatusResponse(
+                    job_id=job_id,
+                    status="complete",
+                    in_library=True,
+                    library_id=library_id,
+                    filename=job_record["filename"],
+                    model=job_record["model"],
+                    submitted_at=job_record["submitted_at"],  # Pydantic will parse ISO string to datetime
+                    completed_at=datetime.now(),  # Pass datetime object, not ISO string
+                    transcript=status_result["transcript"],
+                    confidence=status_result["confidence"],
+                    actual_cost=actual_cost,
+                    metadata=metadata  # TranscriptMetadata model - FastAPI serializes automatically
+                )
 
             else:
                 # Job failed - update record with error
@@ -804,15 +969,16 @@ async def check_job_status(job_id: str):
                     error=status_result.get("error", "Unknown error")
                 )
 
-                return JSONResponse(content={
-                    "job_id": job_id,
-                    "status": "failed",
-                    "filename": job_record["filename"],
-                    "model": job_record["model"],
-                    "submitted_at": job_record["submitted_at"],
-                    "completed_at": datetime.now().isoformat(),
-                    "error": status_result.get("error")
-                })
+                return JobStatusResponse(
+                    job_id=job_id,
+                    status="failed",
+                    filename=job_record["filename"],
+                    model=job_record["model"],
+                    submitted_at=job_record["submitted_at"],  # Pydantic will parse ISO string to datetime
+                    completed_at=datetime.now(),  # Pass datetime object, not ISO string
+                    error=status_result.get("error"),
+                    metadata=None
+                )
 
         # ===== STEP 4: Job still processing, return current status =====
 
@@ -836,14 +1002,15 @@ async def check_job_status(job_id: str):
         if updates:
             job_storage.update_job(job_id, updates)
 
-        return JSONResponse(content={
-            "job_id": job_id,
-            "status": "processing",
-            "filename": job_record["filename"],
-            "model": job_record["model"],
-            "submitted_at": job_record["submitted_at"],
-            "message": "Transcription in progress. Check again in a few seconds."
-        })
+        return JobStatusResponse(
+            job_id=job_id,
+            status="processing",
+            filename=job_record["filename"],
+            model=job_record["model"],
+            submitted_at=job_record["submitted_at"],
+            message="Transcription in progress. Check again in a few seconds.",
+            metadata=None
+        )
 
     except HTTPException:
         # Re-raise HTTP exceptions (like 404 Not Found)

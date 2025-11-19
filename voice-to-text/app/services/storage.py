@@ -17,8 +17,9 @@ import tempfile
 from datetime import datetime, timedelta
 from io import BytesIO
 import logging
-from pydub.utils import mediainfo
 from pydub import AudioSegment
+from app.services.audio_processing import get_audio_processing_service
+from app.services.audio_metadata import get_audio_metadata_service
 
 logger = logging.getLogger(__name__)
 
@@ -60,32 +61,29 @@ class CloudStorageService:
             Tuple of (GCS URI, audio metadata dict)
             Metadata includes: sample_rate, channels, duration, codec
         """
-        # Extract audio metadata before upload
-        # Write to temp file for pydub to read
+        # Extract audio metadata before upload using AudioMetadataService
+        # Write to temp file for metadata service to read
         metadata = {}
         with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
             temp_file.write(audio_bytes)
             temp_path = temp_file.name
 
         try:
-            info = mediainfo(temp_path)
-            metadata = {
-                'sample_rate': int(info.get('sample_rate', 0)),
-                'channels': int(info.get('channels', 0)),
-                'duration': float(info.get('duration', 0)),
-                'codec': info.get('codec_name', 'unknown'),
-                'bit_rate': info.get('bit_rate', 'unknown')
-            }
+            # Use AudioMetadataService for consistent metadata extraction
+            metadata_service = get_audio_metadata_service()
+            metadata = metadata_service.analyze_file(temp_path)
             logger.info(f"Audio metadata: {metadata['sample_rate']}Hz, {metadata['channels']} channels, {metadata['duration']:.1f}s")
         except Exception as e:
             logger.warning(f"Could not extract audio metadata: {e}")
-            # Provide defaults if extraction fails
+            # Provide defaults if extraction fails (matching AudioMetadataService format)
             metadata = {
+                'duration': 0.0,
+                'format': os.path.splitext(filename)[1].lstrip('.') or 'unknown',
+                'codec': 'unknown',
                 'sample_rate': 16000,  # Fallback to optimal speech rate
                 'channels': 1,         # Fallback to mono
-                'duration': 0,
-                'codec': 'unknown',
-                'bit_rate': 'unknown'
+                'bit_rate': None,
+                'file_size': len(audio_bytes)
             }
         finally:
             # Clean up temp file
@@ -163,10 +161,96 @@ class CloudStorageService:
 
         return gcs_uri, metadata
 
+    def _upload_with_enforced_timeout(
+        self,
+        blob,
+        file_path: str,
+        content_type: str,
+        timeout_seconds: int
+    ) -> None:
+        """
+        Upload file with thread-based timeout enforcement.
+        
+        The library's timeout parameter doesn't work for resumable uploads
+        (used automatically for large files), so we enforce our own timeout
+        using threading to prevent indefinite hangs.
+        
+        Args:
+            blob: GCS blob object to upload to
+            file_path: Path to file on disk
+            content_type: MIME content type
+            timeout_seconds: Maximum time to wait for upload (enforced)
+        
+        Raises:
+            TimeoutError: If upload exceeds timeout_seconds
+            Exception: Any exception raised by the upload operation
+        """
+        import threading
+        
+        logger.info(f"Using thread-based timeout wrapper (timeout={timeout_seconds}s)")
+        
+        upload_complete = threading.Event()
+        upload_exception = [None]
+        
+        def upload_worker():
+            try:
+                logger.info("Upload worker thread started - calling upload_from_filename()")
+                # Still set library timeout (may help with initial connection)
+                blob.upload_from_filename(
+                    file_path,
+                    content_type=content_type,
+                    timeout=timeout_seconds
+                )
+                logger.info("Upload worker thread completed successfully")
+            except Exception as e:
+                logger.error(f"Upload worker thread caught exception: {type(e).__name__}: {e}")
+                upload_exception[0] = e
+            finally:
+                upload_complete.set()
+                logger.info("Upload worker thread finished (event set)")
+        
+        # Start upload in daemon thread (cleans up if main thread exits)
+        upload_thread = threading.Thread(target=upload_worker, daemon=True)
+        upload_thread.start()
+        logger.info("Upload thread started, waiting for completion or timeout...")
+        
+        # Wait with our enforced timeout, using polling to allow Ctrl-C interruption
+        # Poll every 1 second instead of one long wait, so Ctrl-C can interrupt
+        elapsed = 0
+        poll_interval = 1.0  # Check every second
+        while elapsed < timeout_seconds:
+            if upload_complete.wait(timeout=poll_interval):
+                # Upload completed
+                break
+            elapsed += poll_interval
+            # Check if thread is still alive (if it died, we'll catch exception below)
+            if not upload_thread.is_alive() and not upload_complete.is_set():
+                # Thread died unexpectedly
+                logger.error("Upload thread died unexpectedly")
+                break
+        
+        if not upload_complete.is_set():
+            # Timeout occurred - raise exception
+            logger.error(f"GCS upload timed out after {timeout_seconds}s - raising TimeoutError")
+            raise TimeoutError(
+                f"GCS upload timed out after {timeout_seconds}s "
+                f"(file={file_path})"
+            )
+        
+        logger.info("Upload completed or exception occurred, checking result...")
+        
+        # Check for exceptions from upload thread
+        if upload_exception[0]:
+            logger.info(f"Re-raising exception from upload thread: {upload_exception[0]}")
+            raise upload_exception[0]
+        
+        logger.info("Upload completed successfully via thread wrapper")
+
     def upload_audio_from_file(
-        self, 
-        file_path: str, 
-        filename: str
+        self,
+        file_path: str,
+        filename: str,
+        channel: Optional[str] = None
     ) -> Tuple[str, Dict]:
         """
         Upload audio file to Cloud Storage from file path (streaming upload).
@@ -177,73 +261,26 @@ class CloudStorageService:
         Args:
             file_path: Path to file on disk
             filename: Original filename (for extension/metadata)
+            channel: Optional channel selection for stereo files:
+                    - "left" or "0": Extract left channel only
+                    - "right" or "1": Extract right channel only
+                    - None or "auto": Use all channels (default)
         
         Returns:
             Tuple of (GCS URI, audio metadata dict)
             Metadata includes: sample_rate, channels, duration, codec
         """
-        # Extract audio metadata from file on disk
-        metadata = {}
-        try:
-            info = mediainfo(file_path)
-            metadata = {
-                'sample_rate': int(info.get('sample_rate', 0)),
-                'channels': int(info.get('channels', 0)),
-                'duration': float(info.get('duration', 0)),
-                'codec': info.get('codec_name', 'unknown'),
-                'bit_rate': info.get('bit_rate', 'unknown')
-            }
-            logger.info(f"Audio metadata: {metadata['sample_rate']}Hz, {metadata['channels']} channels, {metadata['duration']:.1f}s")
-        except Exception as e:
-            logger.warning(f"Could not extract audio metadata: {e}")
-            # Provide defaults if extraction fails
-            metadata = {
-                'sample_rate': 16000,  # Fallback to optimal speech rate
-                'channels': 1,         # Fallback to mono
-                'duration': 0,
-                'codec': 'unknown',
-                'bit_rate': 'unknown'
-            }
-
-        # Handle video files: extract audio first
-        file_extension = os.path.splitext(filename)[1].lower()
-        upload_file_path = file_path
+        # Use AudioProcessingService to handle all audio processing
+        # This includes: video extraction, channel extraction, format conversion
+        logger.info(f"Storage service received channel parameter: {channel} (type: {type(channel).__name__})")
+        audio_processing = get_audio_processing_service()
+        upload_file_path, metadata = audio_processing.prepare_for_upload(
+            file_path,
+            filename,
+            channel=channel
+        )
         
-        # Extract audio from video files (MP4, MOV)
-        if file_extension in ['.mp4', '.mov']:
-            logger.info(f"Video file detected ({file_extension}), extracting audio...")
-            try:
-                # Extract audio using pydub (reads from disk, doesn't load into memory)
-                audio = AudioSegment.from_file(file_path, format=file_extension[1:])
-                
-                # Export to temp MP3 file
-                mp3_path = file_path + ".mp3"
-                audio.export(mp3_path, format="mp3", bitrate="128k")
-                upload_file_path = mp3_path
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
-                
-                logger.info(f"✓ Extracted audio from video: {mp3_path}")
-            except Exception as e:
-                logger.error(f"Failed to extract audio from video: {e}")
-                raise
-
-        # Convert M4A to MP3 (M4A has issues with Google Speech batch_recognize)
-        elif file_extension == '.m4a':
-            logger.warning("⚠️  M4A file detected - converting to MP3 for compatibility")
-            try:
-                # Load M4A audio from disk
-                audio = AudioSegment.from_file(file_path, format="m4a")
-                
-                # Export to temp MP3 file
-                mp3_path = file_path + ".mp3"
-                audio.export(mp3_path, format="mp3", bitrate="128k")
-                upload_file_path = mp3_path
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
-                
-                logger.info(f"✓ Converted M4A to MP3: {mp3_path}")
-            except Exception as e:
-                logger.error(f"Failed to convert M4A to MP3: {e}")
-                logger.warning("Attempting upload as M4A anyway...")
+        logger.info(f"Audio processing complete: {metadata['sample_rate']}Hz, {metadata['channels']} channels, {metadata['duration']:.1f}s")
 
         # Sanitize filename - replace spaces and special chars with underscores
         # Keep only alphanumeric, dots, hyphens, underscores
@@ -283,58 +320,24 @@ class CloudStorageService:
         logger.info(f"Using upload timeout: {timeout_seconds}s ({timeout_seconds/60:.1f} minutes)")
 
         # Stream from disk to GCS (no memory loading!)
-        # For large files (>5MB), use resumable uploads for better performance
-        # Use a progress-tracking file wrapper to monitor upload speed
+        # Use upload_from_filename() which is more reliable than upload_from_file()
+        # For large files (>5MB), explicitly set chunk_size for resumable uploads
         try:
             import time
             
             upload_start = time.time()
-            last_progress_log = upload_start
-            bytes_read = [0]  # Use list to allow modification in nested function
-            
             logger.info(f"Starting GCS upload from {upload_file_path}...")
             logger.info(f"Upload diagnostic: file_size={file_size} bytes ({file_size_mb:.1f} MB), timeout={timeout_seconds}s")
             
-            # Progress-tracking file wrapper
-            class ProgressFile:
-                def __init__(self, file_obj, total_size, start_time, last_log_time, bytes_read_list):
-                    self.file_obj = file_obj
-                    self.total_size = total_size
-                    self.start_time = start_time
-                    self.last_log_time = last_log_time
-                    self.bytes_read_list = bytes_read_list
-                
-                def read(self, size=-1):
-                    chunk = self.file_obj.read(size)
-                    if chunk:
-                        self.bytes_read_list[0] += len(chunk)
-                        current_time = time.time()
-                        
-                        # Log progress every 5 seconds
-                        if current_time - self.last_log_time[0] >= 5.0:
-                            progress_pct = (self.bytes_read_list[0] / self.total_size) * 100 if self.total_size > 0 else 0
-                            elapsed = current_time - self.start_time
-                            if elapsed > 0:
-                                current_speed_mbps = (self.bytes_read_list[0] * 8) / (elapsed * 1_000_000)
-                                logger.info(
-                                    f"Upload progress: {progress_pct:.1f}% ({self.bytes_read_list[0] / (1024*1024):.1f} MB / {file_size_mb:.1f} MB) "
-                                    f"- Speed: {current_speed_mbps:.2f} Mbps - Elapsed: {elapsed:.1f}s"
-                                )
-                            self.last_log_time[0] = current_time
-                    return chunk
-                
-                def __getattr__(self, name):
-                    return getattr(self.file_obj, name)
-            
-            # Use upload_from_file with progress-tracking wrapper
-            # This gives us progress visibility and uses resumable uploads for large files
-            with open(upload_file_path, 'rb') as f:
-                progress_file = ProgressFile(f, file_size, upload_start, [last_progress_log], bytes_read)
-                blob.upload_from_file(
-                    progress_file,
-                    content_type=content_type,
-                    timeout=timeout_seconds
-                )
+            # Use thread-based timeout wrapper to enforce timeout
+            # The library's timeout parameter doesn't work for resumable uploads,
+            # so we wrap it in a thread with our own timeout enforcement
+            self._upload_with_enforced_timeout(
+                blob,
+                upload_file_path,
+                content_type,
+                timeout_seconds
+            )
             
             upload_end = time.time()
             upload_duration = upload_end - upload_start
@@ -347,8 +350,6 @@ class CloudStorageService:
                 logger.warning(f"⚠️  Upload speed is very slow ({upload_speed_mbps:.2f} Mbps). This may indicate:")
                 logger.warning("   - Network connectivity issues")
                 logger.warning("   - GCS bucket region is far from server")
-                logger.warning("   - upload_from_file may not be optimal for large files")
-                logger.warning("   - Consider using resumable uploads for files > 5MB")
         except Exception as e:
             logger.error(
                 f"GCS upload failed: {type(e).__name__}: {e} "

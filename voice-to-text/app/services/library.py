@@ -34,6 +34,8 @@ from typing import Dict, Any, Optional, List
 import tempfile
 import shutil
 
+from app.models.transcript import TranscriptMetadata, transcript_metadata_to_dict
+
 logger = logging.getLogger(__name__)
 
 
@@ -149,7 +151,7 @@ class LibraryService:
         model: str,
         cost: float,
         file_size_bytes: int = 0,
-        metadata: Optional[Dict] = None
+        metadata: Optional[TranscriptMetadata] = None
     ) -> Optional[str]:
         """
         Add a completed transcript to the library.
@@ -163,7 +165,7 @@ class LibraryService:
             model: Transcription model used
             cost: Cost of transcription
             file_size_bytes: Size of transcript file in bytes
-            metadata: Additional metadata to preserve
+            metadata: TranscriptMetadata model instance (unified metadata schema)
 
         Returns:
             library_id if successful, None if failed
@@ -171,6 +173,9 @@ class LibraryService:
         try:
             # Generate unique library ID
             library_id = self._generate_unique_id(filename)
+
+            # Convert model → dict only at JSON boundary
+            metadata_dict = transcript_metadata_to_dict(metadata) if metadata else {}
 
             entry = {
                 "library_id": library_id,
@@ -181,7 +186,7 @@ class LibraryService:
                 "cost": cost,
                 "file_size_bytes": file_size_bytes,
                 "added_at": datetime.now().isoformat(),
-                "metadata": metadata or {}
+                "metadata": metadata_dict
             }
 
             self.library[library_id] = entry
@@ -190,11 +195,13 @@ class LibraryService:
                 logger.info(f"Added to library: {filename} -> {library_id}")
                 return library_id
             else:
-                logger.error(f"Failed to save library after adding {filename}")
+                logger.error(f"Failed to save library after adding {filename} (library_id={library_id})")
+                logger.error(f"  Library entry was created but save failed - entry will be lost on reload")
                 return None
 
         except Exception as e:
-            logger.error(f"Failed to add entry to library: {e}")
+            logger.error(f"Failed to add entry to library: {e}", exc_info=True)
+            logger.error(f"  Filename: {filename}, transcript_file: {transcript_file}")
             return None
 
     def _generate_unique_id(self, filename: str) -> str:

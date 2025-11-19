@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.job import JobStatus, JobModel
+from app.models.transcript import TranscriptMetadata
 
 
 # ============================================================================
@@ -24,6 +25,7 @@ class TranscriptionResponse(BaseModel):
     estimated_cost: float = Field(..., ge=0, description="Estimated cost in USD")
     submitted_at: datetime = Field(..., description="When job was submitted")
     check_status_url: str = Field(..., description="URL to check job status")
+    message: Optional[str] = Field(None, description="Status message (e.g., for queued jobs)")
     
     class Config:
         use_enum_values = True
@@ -53,8 +55,8 @@ class JobStatusResponse(BaseModel):
     in_library: bool = Field(False, description="Whether job is in library")
     library_id: Optional[str] = Field(None, description="Library entry ID if in library")
     
-    # Metadata
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+    # Metadata - using TranscriptMetadata model (not dict) to maintain model integrity
+    metadata: Optional[TranscriptMetadata] = Field(None, description="Transcript metadata")
     
     class Config:
         use_enum_values = True

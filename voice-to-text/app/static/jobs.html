@@ -442,7 +442,16 @@
         function renderJobCard(job) {
             const statusClass = `status-${job.status}`;
             const submittedDate = new Date(job.submitted_at).toLocaleString();
-            const shortId = job.job_id.split('/').pop();
+            
+            // Handle job ID display - support both UUID format and Google operation format
+            const shortId = job.job_id.includes('/') 
+                ? job.job_id.split('/').pop() 
+                : job.job_id.substring(0, 12) + '...';
+            
+            // For queued jobs, show "Job Pending - {filename}" instead of job ID
+            const jobIdDisplay = job.status === 'queued' 
+                ? `Job Pending - ${job.filename}`
+                : `Job ID: ${shortId}`;
 
             // Format model name
             const modelDisplay = job.model
@@ -458,7 +467,7 @@
                             <div class="job-title">${job.filename}</div>
                             <div class="job-meta">
                                 Submitted: ${submittedDate}<br>
-                                Job ID: ${shortId}
+                                ${jobIdDisplay}
                             </div>
                         </div>
                         <div class="status-badge ${statusClass}">
@@ -469,15 +478,23 @@
                     <div class="job-details">
                         <div class="detail-item">
                             <div class="detail-label">Model</div>
-                            <div class="detail-value">${modelDisplay}</div>
+                            <div class="detail-value">${modelDisplay || (job.status === 'queued' ? '<span style="color: #9ca3af;">Pending</span>' : 'Unknown')}</div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">Duration</div>
-                            <div class="detail-value">${Math.round(job.duration_minutes || 0)} min</div>
+                            <div class="detail-value">
+                                ${job.status === 'queued' 
+                                    ? '<span style="color: #9ca3af;">—</span>' 
+                                    : `${Math.round(job.duration_minutes || 0)} min`}
+                            </div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">Cost</div>
-                            <div class="detail-value">$${(job.estimated_cost || 0).toFixed(2)}</div>
+                            <div class="detail-value">
+                                ${job.status === 'queued' 
+                                    ? '<span style="color: #9ca3af;">—</span>' 
+                                    : `$${(job.estimated_cost || 0).toFixed(2)}`}
+                            </div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">Confidence</div>
@@ -488,6 +505,12 @@
                             </div>
                         </div>
                     </div>
+                    
+                    ${job.status === 'queued' && job.message ? `
+                    <div class="status-message" style="display: block; margin-top: 12px; padding: 10px; background: #fef3c7; border-left: 3px solid #f59e0b; font-size: 13px; color: #92400e;">
+                        ${job.message}
+                    </div>
+                    ` : ''}
 
                     ${job.transcript ? `
                     <div class="transcript-preview" id="transcript-${shortId}">
@@ -582,11 +605,11 @@
                     const model = job ? job.model : '';
                     // Get learned estimate from API
                     getEstimatedTime(duration, model).then(estimatedTime => {
-                        statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${estimatedTime}s. Check back in a minute.</em>`;
+                        statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${formatTime(estimatedTime)}. Check back in a minute.</em>`;
                     }).catch(err => {
                         // Fallback to hardcoded
                         const estimatedTime = getEstimatedTimeFallback(duration, model);
-                        statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${estimatedTime}s. Check back in a minute.</em>`;
+                        statusMsg.innerHTML = `🔄 <strong>Processing...</strong> Google is transcribing your audio.<br><em style="font-size: 12px;">Estimated time: ~${formatTime(estimatedTime)}. Check back in a minute.</em>`;
                     });
                     statusMsg.style.borderColor = '#2196F3';
                     checkBtn.disabled = false;
@@ -603,6 +626,21 @@
                 statusMsg.style.borderColor = '#dc3545';
                 checkBtn.disabled = false;
                 checkBtn.textContent = '🔄 Retry';
+            }
+        }
+
+        // Format seconds as "X min Y sec" (human-readable)
+        function formatTime(seconds) {
+            const totalSeconds = Math.round(seconds);
+            const minutes = Math.floor(totalSeconds / 60);
+            const secs = totalSeconds % 60;
+            
+            if (minutes === 0) {
+                return `${secs} sec`;
+            } else if (secs === 0) {
+                return `${minutes} min`;
+            } else {
+                return `${minutes} min ${secs} sec`;
             }
         }
 
@@ -635,7 +673,7 @@
 
         // Remove from jobs (but keep in library)
         async function removeFromJobs(jobId) {
-            const shortId = jobId.split('/').pop();
+            const shortId = jobId.includes('/') ? jobId.split('/').pop() : jobId.substring(0, 12) + '...';
             if (!confirm(`Remove job ${shortId} from jobs list? (Transcript will remain in Library)`)) return;
 
             try {
@@ -661,7 +699,7 @@
 
         // Dismiss a failed job
         async function dismissJob(jobId) {
-            const shortId = jobId.split('/').pop();
+            const shortId = jobId.includes('/') ? jobId.split('/').pop() : jobId.substring(0, 12) + '...';
             if (!confirm(`Dismiss failed job ${shortId}?`)) return;
 
             try {
@@ -687,7 +725,7 @@
 
         // Delete a single job (legacy - kept for compatibility)
         async function deleteJob(jobId) {
-            const shortId = jobId.split('/').pop();
+            const shortId = jobId.includes('/') ? jobId.split('/').pop() : jobId.substring(0, 12) + '...';
             if (!confirm(`Delete job ${shortId}?`)) return;
 
             try {

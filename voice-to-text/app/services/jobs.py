@@ -27,6 +27,8 @@ from typing import Dict, Any, Optional, List
 import tempfile
 import shutil
 
+from app.models.transcript import TranscriptMetadata, transcript_metadata_to_dict
+
 logger = logging.getLogger(__name__)
 
 
@@ -176,7 +178,7 @@ class JobStorageService:
         transcript_filename: str,
         transcript: str,
         confidence: float,
-        metadata: Dict[str, Any]
+        metadata: TranscriptMetadata
     ):
         """
         Save transcript data to a separate file using atomic write.
@@ -185,7 +187,7 @@ class JobStorageService:
             transcript_filename: Name of transcript file (not full path)
             transcript: Full transcript text
             confidence: Confidence score
-            metadata: Additional metadata (words, language, etc.)
+            metadata: TranscriptMetadata model instance (unified metadata schema)
         """
         transcript_path = self.TRANSCRIPTS_DIR / transcript_filename
 
@@ -197,12 +199,15 @@ class JobStorageService:
                 prefix='transcript_'
             )
 
+            # Convert model → dict only at JSON boundary
+            metadata_dict = transcript_metadata_to_dict(metadata)
+            
             # Build transcript data structure
             transcript_data = {
                 "transcript": transcript,
                 "confidence": confidence,
                 "saved_at": datetime.now().isoformat(),
-                "metadata": metadata or {}
+                "metadata": metadata_dict
             }
 
             # Write to temp file
@@ -257,7 +262,8 @@ class JobStorageService:
         tier: str = None,
         duration_minutes: float = 0,
         estimated_cost: float = 0,
-        gcs_uri: str = None
+        gcs_uri: str = None,
+        channel: str = None
     ) -> Dict[str, Any]:
         """
         Create a new job record.
@@ -270,6 +276,7 @@ class JobStorageService:
             duration_minutes: Audio duration in minutes
             estimated_cost: Estimated transcription cost
             gcs_uri: GCS URI of audio file (needed for GCS result lookup)
+            channel: Channel selection for stereo files ('auto', 'left', 'right', or None)
 
         Returns:
             The created job record
@@ -283,10 +290,15 @@ class JobStorageService:
             "duration_minutes": duration_minutes,
             "estimated_cost": estimated_cost,
             "gcs_uri": gcs_uri,  # Store for GCS result lookup
+            "channel": channel,  # Store channel selection for stereo files
             "status": "queued",  # Initial state
             "submitted_at": datetime.now().isoformat(),
             "processing_started_at": None,  # Track when processing actually starts (excludes queueing)
             "updated_at": datetime.now().isoformat(),
+            # Google operation ID (set when job is actually submitted to Google)
+            "google_operation_id": None,
+            # Queue reference (for future batch/retry support)
+            "queue_request_id": None,
             # Results populated later when job completes
             "transcript": None,
             "confidence": None,
@@ -367,7 +379,7 @@ class JobStorageService:
         transcript: str,
         confidence: float,
         actual_cost: float,
-        metadata: Dict[str, Any] = None,
+        metadata: TranscriptMetadata,
         billed_duration_minutes: Optional[float] = None,
         billed_duration_seconds: Optional[float] = None
     ):
@@ -382,7 +394,7 @@ class JobStorageService:
             transcript: The transcribed text
             confidence: Confidence score (0.0 to 1.0)
             actual_cost: Actual cost charged
-            metadata: Optional additional metadata (words, language, etc.)
+            metadata: TranscriptMetadata model instance (unified metadata schema)
         """
         # Get job record to access filename and submitted_at
         job = self.get_job(job_id)

@@ -134,14 +134,38 @@ async def check_job_status(
         JobStatusResponse with current job status and results (if complete)
     """
     try:
-        # Get transcription service for this job
+        # Get job record first to check status
+        job = job_storage.get_job(job_id, include_transcript=False)
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+        
+        # If job is queued, return queued status directly (don't call Google API)
+        if job.get("status") == "queued":
+            return JobStatusResponse(
+                job_id=job_id,
+                status="queued",
+                filename=job.get("filename", "unknown"),
+                model=job.get("model", "unknown"),
+                submitted_at=job.get("submitted_at"),
+                message="System is initializing. Your job will start automatically once the system is ready."
+            )
+        
+        # For non-queued jobs, use normal flow (call Google API)
+        # Use google_operation_id if available, otherwise use job_id
+        google_operation_id = job.get("google_operation_id") or job_id
+        
+        # Get transcription service using internal job_id (not google_operation_id)
+        # because _get_transcription_service_for_job looks up job by job_id
         transcription_service = _get_transcription_service_for_job(job_id, job_storage)
         
-        # Use orchestrator to check status
+        # Use orchestrator to check status with google_operation_id for Google API
         result = orchestrator.check_job_status(
-            job_id=job_id,
+            job_id=google_operation_id,
             transcription_service=transcription_service
         )
+        
+        # Update job_id in result to use internal job_id (not Google operation ID)
+        result["job_id"] = job_id
         
         return JobStatusResponse(**result)
         
@@ -193,13 +217,19 @@ async def reparse_job(
         
         try:
             # Get transcription service for this job
+            # Use google_operation_id if available, otherwise use job_id
+            google_operation_id = job.get("google_operation_id") or job_id
             transcription_service = _get_transcription_service_for_job(job_id, job_storage)
             
             # Re-check job status (this will re-download and parse with new code)
+            # Use google_operation_id for Google API call
             result = orchestrator.check_job_status(
-                job_id=job_id,
+                job_id=google_operation_id,
                 transcription_service=transcription_service
             )
+            
+            # Update job_id in result to use internal job_id
+            result["job_id"] = job_id
             
             return JobStatusResponse(**result)
             

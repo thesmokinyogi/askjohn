@@ -26,6 +26,7 @@ from app.services.processing_time import ProcessingTimeService
 from app.services.audio_metadata import AudioMetadataService
 from app.services.transcribe_v2 import GoogleSpeechV2Service, get_transcription_service_v2
 from app.services.cost_calculation import CostCalculationService
+from app.services.events import get_event_publisher
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,15 @@ class TranscriptionOrchestrator:
             job_id = operation.operation.name
             logger.info(f"Job submitted successfully: {job_id}")
             
+            # Publish job started event for downstream services
+            event_publisher = get_event_publisher()
+            event_publisher.publish_job_started(job_id, {
+                "filename": filename,
+                "model": selected_model,
+                "duration_minutes": duration_minutes,
+                "gcs_uri": gcs_uri
+            })
+            
             # Step 6: Create job record
             job_record = self.job_storage.create_job(
                 job_id=job_id,
@@ -272,7 +282,8 @@ class TranscriptionOrchestrator:
         self,
         file_path: str,
         filename: str,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        existing_job_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Submit a transcription job from a file path (streaming upload).
@@ -292,6 +303,7 @@ class TranscriptionOrchestrator:
             file_path: Path to file on disk
             filename: Original filename
             model: Optional model name (uses default if not provided)
+            existing_job_id: Optional existing job ID (for updating queued jobs)
             
         Returns:
             Dict with job_id, status, filename, model, duration_minutes,
@@ -362,24 +374,56 @@ class TranscriptionOrchestrator:
                 audio_metadata=audio_metadata
             )
             
-            job_id = operation.operation.name
-            logger.info(f"Job submitted successfully: {job_id}")
+            google_operation_id = operation.operation.name
+            logger.info(f"Job submitted successfully: {google_operation_id}")
             
-            # Step 6: Create job record
-            job_record = self.job_storage.create_job(
-                job_id=job_id,
-                filename=filename,
-                model=selected_model,
-                tier=tier,
-                duration_minutes=duration_minutes,
-                estimated_cost=cost_estimate['total_cost'],
-                gcs_uri=gcs_uri
-            )
+            # Publish job started event for downstream services
+            event_publisher = get_event_publisher()
+            event_publisher.publish_job_started(google_operation_id, {
+                "filename": filename,
+                "model": selected_model,
+                "duration_minutes": duration_minutes,
+                "gcs_uri": gcs_uri
+            })
+            
+            # Step 6: Create or update job record
+            if existing_job_id:
+                # Update existing job record (from queue)
+                logger.info(f"Updating existing job record: {existing_job_id}")
+                self.job_storage.update_job(existing_job_id, {
+                    "google_operation_id": google_operation_id,
+                    "status": "processing",
+                    "model": selected_model,
+                    "tier": tier,
+                    "duration_minutes": duration_minutes,
+                    "estimated_cost": cost_estimate['total_cost'],
+                    "gcs_uri": gcs_uri,
+                    "processing_started_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat()
+                })
+                job_id = existing_job_id  # Use existing job_id for response
+                job_record = self.job_storage.get_job(existing_job_id)
+            else:
+                # Create new job record (normal flow)
+                job_id = google_operation_id  # Use Google operation ID as job_id
+                job_record = self.job_storage.create_job(
+                    job_id=job_id,
+                    filename=filename,
+                    model=selected_model,
+                    tier=tier,
+                    duration_minutes=duration_minutes,
+                    estimated_cost=cost_estimate['total_cost'],
+                    gcs_uri=gcs_uri
+                )
+                # Set google_operation_id (same as job_id for new jobs)
+                self.job_storage.update_job(job_id, {
+                    "google_operation_id": google_operation_id
+                })
             
             # Step 7: Return result
             return {
                 "job_id": job_id,
-                "status": "queued",
+                "status": "processing",
                 "filename": filename,
                 "model": selected_model,
                 "duration_minutes": round(duration_minutes, 1),
@@ -428,7 +472,19 @@ class TranscriptionOrchestrator:
         service = transcription_service
         
         # Step 1: Get job record
+        # job_id might be internal job_id or google_operation_id
+        # Try to find by job_id first, then by google_operation_id
         job_record = self.job_storage.get_job(job_id, include_transcript=False)
+        
+        # If not found by job_id, try finding by google_operation_id
+        if not job_record:
+            # Search all jobs for matching google_operation_id
+            all_jobs = self.job_storage.list_jobs()
+            for job in all_jobs.values():
+                if job.get("google_operation_id") == job_id:
+                    job_record = job
+                    job_id = job["job_id"]  # Use internal job_id
+                    break
         
         if not job_record:
             raise ValueError(f"Job not found: {job_id}")
@@ -515,8 +571,9 @@ class TranscriptionOrchestrator:
         # CRITICAL: Check if job was already completed and recorded
         # This prevents duplicate cost recording and library entries
         # Check BEFORE updating job record to avoid race conditions
-        if job_record.get("actual_cost") is not None:
-            logger.warning(f"Job {job_id} already has actual_cost recorded (${job_record.get('actual_cost'):.2f}). Skipping duplicate completion processing.")
+        # BUT: Allow re-adding to library if library_id is missing (e.g., if library addition failed)
+        if job_record.get("actual_cost") is not None and job_record.get("library_id") is not None:
+            logger.warning(f"Job {job_id} already has actual_cost recorded (${job_record.get('actual_cost'):.2f}) and is in library ({job_record.get('library_id')}). Skipping duplicate completion processing.")
             # Return the existing job data
             updated_job = self.job_storage.get_job(job_id, include_transcript=True)
             return {
@@ -533,21 +590,28 @@ class TranscriptionOrchestrator:
                 "metadata": updated_job.get("metadata", {})
             }
         
-        # Update job record with results
-        # Keep GCS JSON metadata pristine - only include GCS-derived data in transcript file
-        metadata_with_words = status_result.get("metadata", {}).copy()
-        if "words" in status_result:
-            metadata_with_words["words"] = status_result["words"]
+        # If job has actual_cost but no library_id, we'll re-add it to library
+        if job_record.get("actual_cost") is not None and job_record.get("library_id") is None:
+            logger.info(f"Job {job_id} has actual_cost but no library_id. Re-adding to library.")
         
+        # Update job record with results
+        # Note: "words" is transcript content, not metadata - it's stored separately in transcript file
         # Note: billed_duration is NOT added to metadata - it comes from operation response, not GCS JSON
         # It will be extracted separately and stored in job record (not transcript file metadata)
+        
+        # Get metadata model from status_result (should already be a TranscriptMetadata model)
+        metadata = status_result.get("metadata")
+        if not isinstance(metadata, TranscriptMetadata):
+            # Fallback: convert dict to model if not already a model
+            from app.models.transcript import dict_to_transcript_metadata
+            metadata = dict_to_transcript_metadata(metadata if metadata else {})
         
         self.job_storage.mark_complete(
             job_id=job_id,
             transcript=status_result["transcript"],
             confidence=status_result["confidence"],
             actual_cost=actual_cost,
-            metadata=metadata_with_words,
+            metadata=metadata,
             # Pass billed_duration separately to preserve data provenance
             billed_duration_minutes=status_result.get("billed_duration_minutes"),
             billed_duration_seconds=status_result.get("billed_duration_seconds")
@@ -582,32 +646,108 @@ class TranscriptionOrchestrator:
         )
         
         # Add to library
-        updated_job = self.job_storage.get_job(job_id)
-        transcript_file = updated_job.get("transcript_file")
+        # Wrap in try/except to prevent library addition failure from blocking job completion
+        library_id = None
+        try:
+            updated_job = self.job_storage.get_job(job_id)
+            transcript_file = updated_job.get("transcript_file")
+            
+            if not transcript_file:
+                logger.warning(f"Job {job_id} has no transcript_file, cannot add to library")
+            else:
+                file_size_bytes = 0
+                transcript_path = self.job_storage.TRANSCRIPTS_DIR / transcript_file
+                if transcript_path.exists():
+                    file_size_bytes = transcript_path.stat().st_size
+                else:
+                    logger.warning(f"Transcript file not found: {transcript_path}, cannot add to library")
+                
+                # Get metadata model (should already be a TranscriptMetadata model from transcribe_v2)
+                library_metadata = status_result.get("metadata")
+                if not isinstance(library_metadata, TranscriptMetadata):
+                    # Fallback: convert dict to model if not already a model
+                    from app.models.transcript import dict_to_transcript_metadata
+                    library_metadata = dict_to_transcript_metadata(library_metadata if library_metadata else {})
+                
+                library_id = self.library_service.add_entry(
+                    filename=job_record["filename"],
+                    transcript_file=transcript_file,
+                    duration_minutes=job_record["duration_minutes"],
+                    model=job_record["model"],
+                    cost=actual_cost,
+                    file_size_bytes=file_size_bytes,
+                    metadata=library_metadata
+                )
+                
+                if library_id:
+                    self.job_storage.update_job(job_id, {
+                        "in_library": True,
+                        "library_id": library_id
+                    })
+                    logger.info(f"Added job {job_id} to library as {library_id}")
+                else:
+                    logger.error(f"Failed to add job {job_id} to library: library_service.add_entry() returned None")
+                    # Set a flag so cleanup can retry
+                    self.job_storage.update_job(job_id, {
+                        "library_add_failed": True
+                    })
         
-        file_size_bytes = 0
-        if transcript_file:
-            transcript_path = self.job_storage.TRANSCRIPTS_DIR / transcript_file
-            if transcript_path.exists():
-                file_size_bytes = transcript_path.stat().st_size
+        except Exception as e:
+            logger.error(f"Exception while adding job {job_id} to library: {e}", exc_info=True)
+            # Set a flag so cleanup can retry
+            self.job_storage.update_job(job_id, {
+                "library_add_failed": True,
+                "library_add_error": str(e)
+            })
         
-        library_id = self.library_service.add_entry(
-            filename=job_record["filename"],
-            transcript_file=transcript_file,
-            duration_minutes=job_record["duration_minutes"],
-            model=job_record["model"],
-            cost=actual_cost,
-            file_size_bytes=file_size_bytes,
-            metadata=status_result.get("metadata")
+        # Publish job completion event for downstream services (Content Cockpit, Contextual Librarian)
+        # Use unified TranscriptOutput model for standardized cross-service format
+        from app.models.transcript import (
+            TranscriptOutput, TranscriptContent, TranscriptMetadata,
+            WordTimestamp
+        )
+        from datetime import datetime
+        
+        # Get metadata model (should already be a TranscriptMetadata model from transcribe_v2)
+        transcript_metadata = status_result.get("metadata")
+        if not isinstance(transcript_metadata, TranscriptMetadata):
+            # Fallback: convert dict to model if not already a model
+            from app.models.transcript import dict_to_transcript_metadata
+            transcript_metadata = dict_to_transcript_metadata(transcript_metadata if transcript_metadata else {})
+        
+        # Build word timestamps
+        words = status_result.get("words", [])
+        word_timestamps = [
+            WordTimestamp(
+                word=w.get("word", ""),
+                start_time=w.get("start_time", 0.0),
+                end_time=w.get("end_time", 0.0),
+                confidence=w.get("confidence")
+            )
+            for w in words
+        ]
+        
+        # Build TranscriptOutput for event publishing
+        transcript_output = TranscriptOutput(
+            transcript_id=library_id,  # Use library_id as transcript_id
+            source_filename=job_record["filename"],
+            source_uri=updated_job.get("gcs_uri"),
+            content=TranscriptContent(
+                transcript=status_result.get("transcript", ""),
+                words=word_timestamps
+            ),
+            metadata=transcript_metadata,
+            confidence=status_result.get("confidence"),
+            duration_seconds=job_record["duration_minutes"] * 60,
+            cost_usd=actual_cost,
+            processing_time_seconds=processing_time_seconds,
+            created_at=datetime.fromisoformat(job_record["submitted_at"]),
+            completed_at=datetime.now() if updated_job.get("completed_at") else None
         )
         
-        # Update job record to indicate it's in library
-        if library_id:
-            self.job_storage.update_job(job_id, {
-                "in_library": True,
-                "library_id": library_id
-            })
-            logger.info(f"Added job {job_id} to library as {library_id}")
+        # Pass model directly to event publisher
+        event_publisher = get_event_publisher()
+        event_publisher.publish_job_completed(job_id, transcript_output)
         
         # Return complete result
         return {
@@ -632,12 +772,21 @@ class TranscriptionOrchestrator:
         status_result: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Handle job failure."""
-        logger.error(f"Job {job_id} failed: {status_result.get('error')}")
+        error_message = status_result.get("error", "Unknown error")
+        logger.error(f"Job {job_id} failed: {error_message}")
         
         self.job_storage.mark_failed(
             job_id=job_id,
-            error=status_result.get("error", "Unknown error")
+            error=error_message
         )
+        
+        # Publish job failure event for downstream services
+        event_publisher = get_event_publisher()
+        event_publisher.publish_job_failed(job_id, error_message, {
+            "filename": job_record["filename"],
+            "model": job_record["model"],
+            "submitted_at": job_record["submitted_at"]
+        })
         
         return {
             "job_id": job_id,
@@ -646,7 +795,7 @@ class TranscriptionOrchestrator:
             "model": job_record["model"],
             "submitted_at": job_record["submitted_at"],
             "completed_at": datetime.now().isoformat(),
-            "error": status_result.get("error")
+            "error": error_message
         }
     
     def _handle_job_processing(
