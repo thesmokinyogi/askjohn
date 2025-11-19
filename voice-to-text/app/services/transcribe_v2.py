@@ -832,6 +832,9 @@ class GoogleSpeechV2Service:
                         uri=f"gs://{output_bucket}/transcripts/"
                     )
                 ),
+                # CRITICAL: Official Google examples include processing_strategy
+                # This might be required for batch recognition to work correctly
+                processing_strategy=cloud_speech.BatchRecognizeRequest.ProcessingStrategy.DYNAMIC_BATCHING,
             )
 
             # Submit batch recognition job
@@ -839,6 +842,20 @@ class GoogleSpeechV2Service:
             # The actual transcription happens asynchronously in Google's queue
             logger.info(f"Submitting batch recognition job for: {gcs_uri}")
             logger.info(f"Model: {config.model}, Language: {config.language_codes}")
+            
+            # DEBUG: Log full config details to diagnose empty transcript issue
+            if hasattr(config, 'features') and config.features:
+                logger.info(f"DEBUG: RecognitionFeatures enabled: enable_word_time_offsets={getattr(config.features, 'enable_word_time_offsets', False)}, enable_word_confidence={getattr(config.features, 'enable_word_confidence', False)}, enable_automatic_punctuation={getattr(config.features, 'enable_automatic_punctuation', False)}")
+            else:
+                logger.warning("DEBUG: No RecognitionFeatures configured!")
+            
+            if hasattr(config, 'explicit_decoding_config') and config.explicit_decoding_config:
+                logger.info(f"DEBUG: ExplicitDecodingConfig: encoding={getattr(config.explicit_decoding_config, 'encoding', 'N/A')}, sample_rate={getattr(config.explicit_decoding_config, 'sample_rate_hertz', 'N/A')}Hz, channels={getattr(config.explicit_decoding_config, 'audio_channel_count', 'N/A')}")
+            elif hasattr(config, 'auto_decoding_config') and config.auto_decoding_config:
+                logger.info("DEBUG: Using AutoDetectDecodingConfig")
+            else:
+                logger.warning("DEBUG: No decoding config specified!")
+            
             operation = self.client.batch_recognize(request=request)
 
             # Extract job ID for logging
@@ -999,6 +1016,21 @@ class GoogleSpeechV2Service:
             file_result = batch_response.results[gcs_uri]
             result_gcs_uri = file_result.uri
             logger.info(f"Fetching results from {result_gcs_uri}")
+            
+            # Extract billed duration from file_result.metadata (this is where it actually lives!)
+            billed_duration_seconds = None
+            if hasattr(file_result, 'metadata') and file_result.metadata:
+                if hasattr(file_result.metadata, 'total_billed_duration'):
+                    duration = file_result.metadata.total_billed_duration
+                    if duration:
+                        billed_duration_seconds = duration.total_seconds()
+                        logger.info(f"Extracted billed duration from file_result.metadata: {billed_duration_seconds:.2f} seconds ({billed_duration_seconds / 60.0:.2f} minutes)")
+                else:
+                    logger.debug(f"DEBUG: file_result.metadata exists but has no total_billed_duration attribute")
+                    logger.debug(f"DEBUG: file_result.metadata attributes: {[attr for attr in dir(file_result.metadata) if not attr.startswith('_')]}")
+            else:
+                logger.debug(f"DEBUG: file_result has no metadata attribute or metadata is None")
+                logger.debug(f"DEBUG: file_result attributes: {[attr for attr in dir(file_result) if not attr.startswith('_')]}")
 
             # Download results from GCS
             # Parse bucket and object path from gs://bucket/path/to/results.json
@@ -1026,18 +1058,22 @@ class GoogleSpeechV2Service:
             blob = bucket.blob(output_object)
             results_bytes = blob.download_as_bytes()
 
-            # Parse JSON results
-            # Following official pattern: BatchRecognizeResults.from_json()
-            batch_recognize_results = cloud_speech.BatchRecognizeResults.from_json(
-                results_bytes,
-                ignore_unknown_fields=True
-            )
-
-            logger.info(f"Downloaded and parsed {len(batch_recognize_results.results)} result segments")
-
-            # Extract transcript from results
-            results = self._parse_batch_results(batch_recognize_results)
-
+            # Parse JSON directly (bypassing Protobuf deserializer which fails to populate alternatives)
+            # Per Gemini: The Protobuf from_json() method fails to deserialize the alternatives content
+            # due to parsing impedance mismatch. Manual JSON parsing is more reliable.
+            import json
+            results_json = json.loads(results_bytes.decode('utf-8'))
+            
+            # Extract transcript from results using direct JSON parsing
+            results = self._parse_batch_results_from_json(results_json)
+            
+            # Add billed_duration as top-level fields (not in metadata) to preserve data provenance
+            # metadata contains only GCS JSON-derived data; billed_duration comes from operation response
+            if billed_duration_seconds is not None:
+                results['billed_duration_seconds'] = round(billed_duration_seconds, 2)
+                results['billed_duration_minutes'] = round(billed_duration_seconds / 60.0, 2)
+                logger.info(f"Added billed_duration to results: {results['billed_duration_minutes']:.2f} minutes")
+            
             # Add done flag to results
             results["done"] = True
 
@@ -1096,6 +1132,39 @@ class GoogleSpeechV2Service:
             logger.info(f"Starting batch recognition for: {gcs_uri}")
             logger.info(f"File metadata: {file_metadata}")
             logger.info(f"Config: auto_decoding={hasattr(config, 'auto_decoding_config')}, model={config.model}, lang={config.language_codes}")
+            
+            # DEBUG: Log full config details to diagnose empty transcript issue
+            if hasattr(config, 'features') and config.features:
+                logger.info(f"DEBUG: RecognitionFeatures enabled: enable_word_time_offsets={getattr(config.features, 'enable_word_time_offsets', False)}, enable_word_confidence={getattr(config.features, 'enable_word_confidence', False)}, enable_automatic_punctuation={getattr(config.features, 'enable_automatic_punctuation', False)}")
+            else:
+                logger.warning("DEBUG: No RecognitionFeatures configured!")
+            
+            # DEBUG: Check decoding config - protobuf messages can have attributes that exist but are "empty"
+            explicit_val = getattr(config, 'explicit_decoding_config', None)
+            auto_val = getattr(config, 'auto_decoding_config', None)
+            
+            logger.info(f"DEBUG: explicit_decoding_config type: {type(explicit_val)}, value: {explicit_val}")
+            logger.info(f"DEBUG: auto_decoding_config type: {type(auto_val)}, value: {auto_val}")
+            
+            # Check if values are actually set (not None and not empty protobuf messages)
+            if explicit_val is not None:
+                # Check if it's a protobuf message that's actually populated
+                try:
+                    # Try to access a field to see if it's populated
+                    encoding = getattr(explicit_val, 'encoding', None)
+                    if encoding is not None:
+                        logger.info(f"DEBUG: ExplicitDecodingConfig: encoding={encoding}, sample_rate={getattr(explicit_val, 'sample_rate_hertz', 'N/A')}Hz, channels={getattr(explicit_val, 'audio_channel_count', 'N/A')}")
+                    else:
+                        logger.warning("DEBUG: explicit_decoding_config exists but is empty/unpopulated")
+                except Exception as e:
+                    logger.warning(f"DEBUG: Error checking explicit_decoding_config: {e}")
+            elif auto_val is not None:
+                # AutoDetectDecodingConfig is typically an empty message (no fields)
+                # Just check if it exists
+                logger.info("DEBUG: Using AutoDetectDecodingConfig")
+            else:
+                logger.warning("DEBUG: No decoding config specified! (both are None)")
+            
             operation = self.client.batch_recognize(request=request)
 
             # Poll until complete
@@ -1206,11 +1275,16 @@ class GoogleSpeechV2Service:
         else:
             logger.info(f"Skipping automatic_punctuation (unsupported by {self.model}/{language_code})")
 
-        # Word timestamps
+        # Word timestamps - CRITICAL: Always enable for debugging (per Gemini recommendation)
+        # Even if not in supported_features, try to enable it to force verbose output
+        # This helps diagnose why transcripts are empty
         if 'word_level_timestamps' in supported_features:
             feature_config['enable_word_time_offsets'] = True
+            logger.info(f"✓ Enabled word_time_offsets (supported by {self.model}/{language_code})")
         else:
-            logger.info(f"Skipping word_time_offsets (unsupported by {self.model}/{language_code})")
+            # Try to enable anyway - some models may support it even if metadata doesn't indicate it
+            feature_config['enable_word_time_offsets'] = True
+            logger.warning(f"⚠️  Enabling word_time_offsets despite metadata saying unsupported (for debugging)")
 
         # Word confidence scores
         if 'word_level_confidence' in supported_features:
@@ -1245,6 +1319,9 @@ class GoogleSpeechV2Service:
                 logger.info(f"Skipping phrase hints - {self.model} does not support speech adaptation")
 
         # Build config with adaptation if vocabulary exists
+        # DEBUG: Log what's in decoding_config_kwargs before spreading
+        logger.info(f"DEBUG: decoding_config_kwargs keys: {list(decoding_config_kwargs.keys())}")
+        
         config_kwargs = {
             **decoding_config_kwargs,
             'language_codes': [language_code],
@@ -1254,117 +1331,156 @@ class GoogleSpeechV2Service:
         if adaptation:
             config_kwargs['adaptation'] = adaptation
         
+        # DEBUG: Log what's in config_kwargs before creating RecognitionConfig
+        logger.info(f"DEBUG: config_kwargs keys: {list(config_kwargs.keys())}")
+        
         config = cloud_speech.RecognitionConfig(**config_kwargs)
+        
+        # DEBUG: Verify decoding config is in the created config object
+        logger.info(f"DEBUG: After creating RecognitionConfig - has explicit_decoding_config: {hasattr(config, 'explicit_decoding_config')}, has auto_decoding_config: {hasattr(config, 'auto_decoding_config')}")
 
         return config
 
-    def _parse_batch_results(self, batch_results: cloud_speech.BatchRecognizeResults) -> Dict:
+    def _parse_batch_results_from_json(self, results_json) -> Dict:
         """
-        Parse BatchRecognizeResults from GCS JSON file.
-
-        This is simpler than parsing the operation response because the JSON
-        is already deserialized into the proper structure.
-
+        Parse batch recognition results from raw JSON (bypassing Protobuf deserializer).
+        
+        Per Gemini: The Protobuf from_json() method fails to populate alternatives
+        due to parsing impedance mismatch. This method parses the JSON directly.
+        
         Args:
-            batch_results: BatchRecognizeResults from GCS (deserialized JSON)
-
+            results_json: Raw JSON dict from GCS file
+            
         Returns:
             Structured dict with transcript and metadata
         """
         try:
             results = []
             word_details = []
-
-            # Iterate through results - this is already properly structured JSON
             word_confidence_sum = 0.0
             word_count = 0
             
-            for result in batch_results.results:
-                if result.alternatives:
-                    alternative = result.alternatives[0]  # Best alternative
-
-                    # Append transcript
-                    results.append(alternative.transcript)
+            # The GCS JSON structure: results is a list of segments
+            # Handle both cases: top-level list or wrapped in 'results' field
+            if isinstance(results_json, list):
+                segments = results_json
+            elif 'results' in results_json and isinstance(results_json['results'], list):
+                segments = results_json['results']
+            else:
+                logger.error(f"Unexpected JSON structure: {type(results_json)}")
+                return {
+                    "success": False,
+                    "transcript": "",
+                    "confidence": None,
+                    "words": [],
+                    "metadata": {},
+                    "error": "Unexpected JSON structure"
+                }
+            
+            logger.info(f"Parsing {len(segments)} segments from JSON")
+            
+            # Extract transcript from alternatives array in each segment
+            for segment in segments:
+                if 'alternatives' in segment and segment['alternatives']:  # Check if alternatives array is not empty
+                    # Get the first (best) alternative
+                    # Edge case: alternatives might be a list or a single dict
+                    top_alternative = segment['alternatives'][0] if isinstance(segment['alternatives'], list) else segment['alternatives']
                     
-                    # Extract word-level details if available
-                    if hasattr(alternative, 'words') and alternative.words:
-                        for word_info in alternative.words:
-                            word_conf = getattr(word_info, 'confidence', None)
-                            if word_conf is not None:
-                                word_confidence_sum += word_conf
-                                word_count += 1
-                            
-                            word_details.append({
-                                "word": word_info.word,
-                                "start_time": word_info.start_offset.total_seconds(),
-                                "end_time": word_info.end_offset.total_seconds(),
-                                "confidence": word_conf if word_conf is not None else 0.0
-                            })
-
+                    if 'transcript' in top_alternative:
+                        transcript_text = top_alternative['transcript']
+                        if transcript_text:  # Only add non-empty transcripts
+                            results.append(transcript_text)
+                        
+                        # Extract word-level details if available
+                        if 'words' in top_alternative and top_alternative['words']:
+                            for word_info in top_alternative['words']:
+                                word_conf = word_info.get('confidence', None)
+                                if word_conf is not None and word_conf > 0:
+                                    word_confidence_sum += word_conf
+                                    word_count += 1
+                                
+                                # Extract timing information
+                                start_time = 0.0
+                                end_time = 0.0
+                                if 'startOffset' in word_info:
+                                    # Handle duration format (e.g., "1.5s" or {"seconds": 1, "nanos": 500000000})
+                                    start_offset = word_info['startOffset']
+                                    if isinstance(start_offset, str):
+                                        start_time = float(start_offset.rstrip('s'))
+                                    elif isinstance(start_offset, dict):
+                                        start_time = start_offset.get('seconds', 0) + start_offset.get('nanos', 0) / 1e9
+                                
+                                if 'endOffset' in word_info:
+                                    end_offset = word_info['endOffset']
+                                    if isinstance(end_offset, str):
+                                        end_time = float(end_offset.rstrip('s'))
+                                    elif isinstance(end_offset, dict):
+                                        end_time = end_offset.get('seconds', 0) + end_offset.get('nanos', 0) / 1e9
+                                
+                                word_details.append({
+                                    "word": word_info.get('word', ''),
+                                    "start_time": start_time,
+                                    "end_time": end_time,
+                                    "confidence": word_conf if word_conf is not None else 0.0
+                                })
+            
             # Combine results
             full_transcript = " ".join(results)
             
-            # Calculate average confidence from word-level scores (more accurate)
-            # Fall back to alternative-level confidence if word-level not available
-            if word_count > 0:
-                # Check if all word confidences are 0.0 (chirp model limitation)
-                if word_confidence_sum > 0.0:
-                    avg_confidence = word_confidence_sum / word_count
-                else:
-                    # All word confidences are 0.0 - confidence not available (e.g., chirp)
-                    avg_confidence = None
+            # Calculate average confidence from word-level scores
+            if word_count > 0 and word_confidence_sum > 0.0:
+                avg_confidence = word_confidence_sum / word_count
             else:
-                # Fallback: try to get from alternatives if available
+                # Try to get from alternative-level confidence
                 total_confidence = 0.0
                 conf_count = 0
-                for result in batch_results.results:
-                    if result.alternatives:
-                        alt_conf = getattr(result.alternatives[0], 'confidence', None)
-                        # Only count non-zero confidence values
-                        # Some models (like chirp) return 0.0 even though field exists
+                for segment in segments:
+                    if 'alternatives' in segment and segment['alternatives']:
+                        top_alternative = segment['alternatives'][0] if isinstance(segment['alternatives'], list) else segment['alternatives']
+                        alt_conf = top_alternative.get('confidence', None)
                         if alt_conf is not None and alt_conf > 0.0:
                             total_confidence += alt_conf
                             conf_count += 1
                 
-                # If we found valid confidence values, use them
-                # Otherwise, confidence is not available for this model
                 if conf_count > 0:
                     avg_confidence = total_confidence / conf_count
                 else:
-                    # No valid confidence available (e.g., chirp model)
                     avg_confidence = None
-
-            # Extract billed duration from metadata (actual usage from Google)
+            
+            # Extract billed duration from metadata if available
+            # Note: billed_duration is typically extracted from operation response, not GCS JSON
+            # This is a fallback check for edge cases where it might be in the JSON
             billed_duration_seconds = None
-            for result in batch_results.results:
-                if hasattr(result, 'metadata') and result.metadata:
-                    if hasattr(result.metadata, 'total_billed_duration'):
-                        # total_billed_duration is a Duration protobuf
-                        duration = result.metadata.total_billed_duration
-                        if duration:
-                            # Convert Duration to seconds
-                            billed_duration_seconds = duration.total_seconds()
-                            logger.info(f"Extracted billed duration from batch results: {billed_duration_seconds:.2f} seconds")
-                            break  # Use first result's metadata
-
+            
+            # Check top-level metadata (unlikely but possible)
+            if isinstance(results_json, dict) and 'metadata' in results_json:
+                metadata = results_json['metadata']
+                if isinstance(metadata, dict) and 'totalBilledDuration' in metadata:
+                    duration = metadata['totalBilledDuration']
+                    if isinstance(duration, str):
+                        billed_duration_seconds = float(duration.rstrip('s'))
+                    elif isinstance(duration, dict):
+                        billed_duration_seconds = duration.get('seconds', 0) + duration.get('nanos', 0) / 1e9
+            
+            # Check if metadata is in the first segment (very unlikely)
+            if billed_duration_seconds is None and segments:
+                first_segment = segments[0] if segments else None
+                if isinstance(first_segment, dict) and 'metadata' in first_segment:
+                    seg_metadata = first_segment['metadata']
+                    if isinstance(seg_metadata, dict) and 'totalBilledDuration' in seg_metadata:
+                        duration = seg_metadata['totalBilledDuration']
+                        if isinstance(duration, str):
+                            billed_duration_seconds = float(duration.rstrip('s'))
+                        elif isinstance(duration, dict):
+                            billed_duration_seconds = duration.get('seconds', 0) + duration.get('nanos', 0) / 1e9
+            
             logger.info(f"Parsed {len(results)} segments, {len(word_details)} words")
             if avg_confidence is not None:
-                logger.info(f"Confidence calculation: word_count={word_count}, avg_confidence={avg_confidence:.4f}")
+                logger.info(f"Confidence: {avg_confidence:.4f}")
             else:
-                logger.info(f"Confidence calculation: word_count={word_count}, confidence not available for this model")
-            if word_count == 0 and len(results) > 0:
-                logger.warning(f"No word-level data found. Checking alternative-level confidence...")
-                # Debug: log what we actually got from alternatives
-                for i, result in enumerate(batch_results.results[:3]):  # First 3 for debugging
-                    if result.alternatives:
-                        alt = result.alternatives[0]
-                        has_conf = hasattr(alt, 'confidence')
-                        conf_val = getattr(alt, 'confidence', 'N/A')
-                        has_words = hasattr(alt, 'words')
-                        word_count_alt = len(alt.words) if has_words and alt.words else 0
-                        logger.info(f"  Result {i}: has_confidence={has_conf}, confidence={conf_val}, has_words={has_words}, word_count={word_count_alt}")
-
-            # Build metadata with actual billed duration from Google
+                logger.info("Confidence not available for this model")
+            
+            # Build metadata
             metadata = {
                 "total_words": len(word_details),
                 "model": self.model,
@@ -1372,12 +1488,10 @@ class GoogleSpeechV2Service:
                 "api_version": "v2"
             }
             
-            # Include actual billed duration from Google (if available)
             if billed_duration_seconds is not None:
                 metadata["billed_duration_seconds"] = round(billed_duration_seconds, 2)
                 metadata["billed_duration_minutes"] = round(billed_duration_seconds / 60.0, 2)
-                logger.info(f"Including billed duration in metadata: {metadata['billed_duration_minutes']:.2f} minutes")
-
+            
             return {
                 "success": True,
                 "transcript": full_transcript,
@@ -1385,16 +1499,16 @@ class GoogleSpeechV2Service:
                 "words": word_details,
                 "metadata": metadata
             }
-
+            
         except Exception as e:
-            logger.error(f"Error parsing GCS results: {e}", exc_info=True)
+            logger.error(f"Error parsing batch results from JSON: {e}", exc_info=True)
             return {
                 "success": False,
-                "error": f"Result parsing error: {str(e)}",
                 "transcript": "",
-                "confidence": 0.0,
+                "confidence": None,
                 "words": [],
-                "metadata": {"error_type": "parsing_error"}
+                "metadata": {},
+                "error": f"Result parsing error: {e}"
             }
 
     def _parse_results(self, response) -> Dict:

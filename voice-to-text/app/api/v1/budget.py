@@ -186,6 +186,7 @@ async def estimate_processing_time(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error estimating processing time: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e) if e else f"{type(e).__name__}"
+        logger.error(f"Error estimating processing time: {error_msg}", exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 

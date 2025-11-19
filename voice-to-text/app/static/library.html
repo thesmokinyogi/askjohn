@@ -190,6 +190,7 @@
             word-break: break-word;
             line-height: 1.4;
         }
+        
 
         .date-cell {
             color: #666;
@@ -406,6 +407,20 @@
                 const data = await response.json();
 
                 libraryEntries = data.entries || [];
+                
+                // Debug: Log what we received
+                console.log(`Loaded ${libraryEntries.length} library entries`);
+                const filenameCounts = {};
+                libraryEntries.forEach(entry => {
+                    const filename = entry.filename;
+                    filenameCounts[filename] = (filenameCounts[filename] || 0) + 1;
+                });
+                const duplicates = Object.entries(filenameCounts).filter(([f, c]) => c > 1);
+                if (duplicates.length > 0) {
+                    console.warn('Found duplicate filenames:', duplicates);
+                } else {
+                    console.log('No duplicate filenames found');
+                }
 
                 // Hide loading
                 document.getElementById('loading').style.display = 'none';
@@ -456,6 +471,26 @@
             const tbody = document.getElementById('library-tbody');
             tbody.innerHTML = '';
 
+            // Group entries by filename to detect actual duplicates
+            const entriesByFilename = {};
+            libraryEntries.forEach(entry => {
+                const filename = entry.filename;
+                if (!entriesByFilename[filename]) {
+                    entriesByFilename[filename] = [];
+                }
+                entriesByFilename[filename].push(entry);
+            });
+            
+            // Debug: Log duplicate detection
+            const duplicateFilenames = Object.keys(entriesByFilename).filter(f => entriesByFilename[f].length > 1);
+            if (duplicateFilenames.length > 0) {
+                console.warn('Displaying duplicates for:', duplicateFilenames);
+                duplicateFilenames.forEach(f => {
+                    console.log(`  ${f}: ${entriesByFilename[f].length} entries`);
+                    entriesByFilename[f].forEach(e => console.log(`    - ${e.library_id}`));
+                });
+            }
+
             libraryEntries.forEach(entry => {
                 const row = document.createElement('tr');
 
@@ -469,8 +504,39 @@
                 // Format file size
                 const size = formatFileSize(entry.file_size_bytes);
 
+                // Only show version number if there are actually multiple entries for this filename
+                const filename = entry.filename;
+                const isDuplicate = entriesByFilename[filename].length > 1;
+                
+                let displayName = entry.filename;
+                if (isDuplicate) {
+                    // Extract version number from library_id (e.g., "file.mp3_2" -> "2", "file.mp3" -> "")
+                    const versionMatch = entry.library_id.match(/_(\d+)$/);
+                    let versionNumber = versionMatch ? parseInt(versionMatch[1]) : 1; // Default to 1 if no suffix
+                    
+                    // If no version suffix in library_id but it's a duplicate, assign based on order
+                    if (!versionMatch) {
+                        // Find index in sorted list (by added_at)
+                        const sortedEntries = entriesByFilename[filename].sort((a, b) => 
+                            new Date(a.added_at) - new Date(b.added_at)
+                        );
+                        versionNumber = sortedEntries.findIndex(e => e.library_id === entry.library_id) + 1;
+                    }
+                    
+                    // Split filename into name and extension
+                    const lastDot = entry.filename.lastIndexOf('.');
+                    if (lastDot > 0) {
+                        const nameWithoutExt = entry.filename.substring(0, lastDot);
+                        const extension = entry.filename.substring(lastDot);
+                        displayName = `${nameWithoutExt}-${versionNumber}${extension}`;
+                    } else {
+                        // No extension, just append version
+                        displayName = `${entry.filename}-${versionNumber}`;
+                    }
+                }
+
                 row.innerHTML = `
-                    <td class="filename-cell" title="${entry.filename}">${entry.filename}</td>
+                    <td class="filename-cell" title="${entry.filename} (ID: ${entry.library_id})">${displayName}</td>
                     <td class="date-cell">${dateStr}</td>
                     <td class="duration-cell">${duration}</td>
                     <td class="size-cell">${size}</td>

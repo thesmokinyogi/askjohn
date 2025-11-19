@@ -156,6 +156,65 @@ async def check_job_status(
         )
 
 
+@router.post("/jobs/{job_id:path}/reparse", response_model=JobStatusResponse)
+async def reparse_job(
+    job_id: str = Path(..., description="Job identifier"),
+    job_storage: JobStorageService = Depends(get_job_storage),
+    orchestrator: TranscriptionOrchestrator = Depends(get_orchestrator)
+):
+    """
+    Force re-parse a completed job's transcript.
+    
+    Useful when parsing logic has been fixed and you want to re-extract
+    the transcript from an existing completed job.
+    
+    Args:
+        job_id: The Google operation name (full path with slashes)
+        
+    Returns:
+        JobStatusResponse with re-parsed transcript
+    """
+    try:
+        # Get job to verify it exists and is complete
+        job = job_storage.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+        
+        # Allow re-parsing of complete or failed jobs (failed might be due to parsing errors)
+        if job["status"] not in ["complete", "failed"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Job status is '{job['status']}'. Only completed or failed jobs can be re-parsed."
+            )
+        
+        # Temporarily mark as processing to bypass cache
+        original_status = job["status"]
+        job_storage.update_job(job_id, {"status": "processing"})
+        
+        try:
+            # Get transcription service for this job
+            transcription_service = _get_transcription_service_for_job(job_id, job_storage)
+            
+            # Re-check job status (this will re-download and parse with new code)
+            result = orchestrator.check_job_status(
+                job_id=job_id,
+                transcription_service=transcription_service
+            )
+            
+            return JobStatusResponse(**result)
+            
+        except Exception as e:
+            # Restore original status on error
+            job_storage.update_job(job_id, {"status": original_status})
+            raise
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error re-parsing job {job_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to re-parse job: {str(e)}")
+
+
 @router.delete("/jobs/{job_id:path}", response_model=SuccessResponse)
 async def delete_job(
     job_id: str = Path(..., description="Job identifier"),

@@ -13,6 +13,9 @@ from typing import Dict, Any
 import os
 import json
 import logging
+import tempfile
+import glob
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -155,10 +158,73 @@ else:
     )
 
 
+def cleanup_orphaned_temp_files():
+    """
+    Clean up orphaned temp files from interrupted uploads.
+    
+    Scans the system temp directory for files matching our temp file patterns
+    (tmp*.m4a, tmp*.mp3, etc.) that are older than 1 hour and removes them.
+    This prevents disk space leaks from server restarts during uploads.
+    """
+    
+    # Get system temp directory
+    temp_dir = tempfile.gettempdir()
+    
+    # Patterns for temp files we create
+    # NamedTemporaryFile creates files like: tmpXXXXXX, tmpXXXXXX.m4a, tmpXXXXXX.mp3
+    # We only clean files with our known audio extensions to avoid deleting other system temp files
+    patterns = [
+        os.path.join(temp_dir, "tmp*.m4a"),
+        os.path.join(temp_dir, "tmp*.mp3"),
+        os.path.join(temp_dir, "tmp*.wav"),
+        os.path.join(temp_dir, "tmp*.ogg"),
+        os.path.join(temp_dir, "tmp*.flac"),
+        # Also match converted files (e.g., tmpXXXXXX.m4a.mp3 from M4A conversion)
+        os.path.join(temp_dir, "tmp*.m4a.mp3"),
+    ]
+    
+    # Age threshold: 1 hour (3600 seconds)
+    age_threshold_seconds = 3600
+    current_time = time.time()
+    
+    total_size = 0
+    files_removed = 0
+    
+    for pattern in patterns:
+        for file_path in glob.glob(pattern):
+            try:
+                # Check if file exists and get its age
+                if os.path.isfile(file_path):
+                    file_age = current_time - os.path.getmtime(file_path)
+                    
+                    # Remove if older than threshold
+                    if file_age > age_threshold_seconds:
+                        file_size = os.path.getsize(file_path)
+                        total_size += file_size
+                        os.unlink(file_path)
+                        files_removed += 1
+                        logger.debug(f"Cleaned up orphaned temp file: {file_path} ({file_size / (1024*1024):.1f} MB, age: {file_age/3600:.1f} hours)")
+            except (OSError, PermissionError) as e:
+                # Skip files we can't access (might be in use or permission denied)
+                logger.debug(f"Could not clean up temp file {file_path}: {e}")
+                continue
+    
+    if files_removed > 0:
+        logger.info(
+            f"Cleaned up {files_removed} orphaned temp file(s), "
+            f"freed {total_size / (1024*1024):.1f} MB of disk space"
+        )
+    else:
+        logger.debug("No orphaned temp files found to clean up")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Verify services on startup."""
     logger.info(f"Starting Voice-to-Text Service (Provider: {STT_PROVIDER})")
+    
+    # Clean up orphaned temp files from interrupted uploads
+    cleanup_orphaned_temp_files()
 
     if STT_PROVIDER == "google":
         # Verify bucket access for Google provider
@@ -322,39 +388,48 @@ async def transcribe_audio(
             detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
         )
 
-    # Read file bytes into memory
+    # Stream file to temp file instead of loading into memory (for large files)
+    temp_path = None
     try:
-        audio_bytes = await file.read()
-    except Exception as e:
-        logger.error(f"Error reading file: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error reading file: {str(e)}"
-        )
+        # Get file extension for temp file
+        file_extension = Path(file.filename).suffix if file.filename else '.tmp'
+        
+        # Stream upload to temp file (chunk by chunk, ~8KB buffer)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+            temp_path = temp_file.name
+            chunk_size = 8192  # 8KB chunks
+            
+            # Stream file to disk
+            total_size = 0
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                temp_file.write(chunk)
+                total_size += len(chunk)
+        
+        # Validate file size (get from disk)
+        max_size_mb = 500 if STT_PROVIDER == "google" else 10
+        if total_size > max_size_mb * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size: {max_size_mb}MB"
+            )
 
-    # Validate file size
-    max_size_mb = 500 if STT_PROVIDER == "google" else 10
-    if len(audio_bytes) > max_size_mb * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum size: {max_size_mb}MB"
-        )
+        logger.info(f"Processing file: {file.filename} ({total_size} bytes, streamed to {temp_path})")
 
-    logger.info(f"Processing file: {file.filename} ({len(audio_bytes)} bytes)")
+        # ===== STEP 2: Upload to Cloud Storage (streaming from disk) =====
 
-    # ===== STEP 2: Upload to Cloud Storage =====
-
-    gcs_uri = None
-    try:
+        gcs_uri = None
         # TEST MODE: Skip upload for faster testing
         if TEST_MODE_SKIP_UPLOAD:
             logger.warning("⚠️  TEST MODE: Skipping upload, using cached file")
             gcs_uri = TEST_GCS_URI
             audio_metadata = TEST_AUDIO_METADATA
         else:
-            # Normal mode: Upload to GCS and extract metadata
-            logger.info("Uploading to Cloud Storage...")
-            gcs_uri, audio_metadata = storage_service.upload_audio(audio_bytes, file.filename)
+            # Normal mode: Upload to GCS and extract metadata (streaming from disk)
+            logger.info("Uploading to Cloud Storage (streaming from disk)...")
+            gcs_uri, audio_metadata = storage_service.upload_audio_from_file(temp_path, file.filename)
             logger.info(f"Uploaded to: {gcs_uri}")
 
         # ===== STEP 3: Calculate estimated cost =====
@@ -443,6 +518,14 @@ async def transcribe_audio(
             status_code=500,
             detail=f"Error submitting transcription: {str(e)}"
         )
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"Cleaned up temp file: {temp_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
 
 
 @app.get("/api/jobs/{job_id:path}/status")
@@ -487,6 +570,7 @@ async def check_job_status(job_id: str):
 
         # If job is already marked complete/failed in our records, return cached result
         # This avoids unnecessary API calls to Google for jobs we've already processed
+        # CRITICAL: This prevents duplicate cost recording and library entries
         if job_record["status"] in ["complete", "failed"]:
             logger.info(f"Returning cached status for job {job_id}: {job_record['status']}")
 
@@ -541,6 +625,38 @@ async def check_job_status(job_id: str):
         # ===== STEP 3: Update our job record if status changed =====
 
         if status_result["done"]:
+            # CRITICAL: Check again if job was marked complete between our initial check and now
+            # This prevents race conditions where multiple polls process the same completion
+            updated_job_record = job_storage.get_job(job_id, include_transcript=False)
+            if updated_job_record and updated_job_record["status"] in ["complete", "failed"]:
+                logger.warning(f"Job {job_id} was already marked {updated_job_record['status']} by another request. Skipping duplicate processing.")
+                # Return the already-processed result
+                if updated_job_record["status"] == "complete":
+                    job_with_transcript = job_storage.get_job(job_id, include_transcript=True)
+                    return JSONResponse(content={
+                        "job_id": job_id,
+                        "status": job_with_transcript["status"],
+                        "in_library": job_with_transcript.get("in_library", False),
+                        "library_id": job_with_transcript.get("library_id"),
+                        "filename": job_with_transcript["filename"],
+                        "model": job_with_transcript["model"],
+                        "submitted_at": job_with_transcript["submitted_at"],
+                        "completed_at": job_with_transcript.get("completed_at"),
+                        "transcript": job_with_transcript.get("transcript"),
+                        "confidence": job_with_transcript.get("confidence"),
+                        "actual_cost": job_with_transcript.get("actual_cost")
+                    })
+                else:
+                    return JSONResponse(content={
+                        "job_id": job_id,
+                        "status": updated_job_record["status"],
+                        "filename": updated_job_record["filename"],
+                        "model": updated_job_record["model"],
+                        "submitted_at": updated_job_record["submitted_at"],
+                        "completed_at": updated_job_record.get("completed_at"),
+                        "error": updated_job_record.get("error")
+                    })
+
             # Job finished (either successfully or with error)
 
             if status_result["status"] == "complete":
@@ -587,7 +703,9 @@ async def check_job_status(job_id: str):
                     transcript=status_result["transcript"],
                     confidence=status_result["confidence"],
                     actual_cost=actual_cost,
-                    metadata=metadata
+                    metadata=metadata,
+                    billed_duration_minutes=status_result.get("billed_duration_minutes"),
+                    billed_duration_seconds=status_result.get("billed_duration_seconds")
                 )
 
                 # Record processing time for feedback loop
@@ -616,13 +734,19 @@ async def check_job_status(job_id: str):
 
                 # Update budget service with actual usage
                 # This tracks our monthly spending
-                budget_service.record_transcription(
-                    provider=STT_PROVIDER,
-                    model=job_record["model"],
-                    duration_minutes=billed_duration_minutes,
-                    cost=actual_cost,
-                    free_minutes_used=actual_free_minutes_used
-                )
+                # CRITICAL: Only record if job doesn't already have actual_cost set
+                # This prevents duplicate recording when status is checked multiple times
+                if not job_record.get("actual_cost"):
+                    logger.info(f"Recording transcription cost for job {job_id}: ${actual_cost:.2f}")
+                    budget_service.record_transcription(
+                        provider=STT_PROVIDER,
+                        model=job_record["model"],
+                        duration_minutes=billed_duration_minutes,
+                        cost=actual_cost,
+                        free_minutes_used=actual_free_minutes_used
+                    )
+                else:
+                    logger.info(f"Job {job_id} already has actual_cost recorded (${job_record.get('actual_cost'):.2f}). Skipping duplicate budget recording.")
 
                 # Add to library - permanent storage for completed transcripts
                 # Get updated job record to access transcript_file
@@ -921,6 +1045,9 @@ async def detect_duration(file: UploadFile = File(...)):
             "filename": "audio.mp3"
         }
     """
+    # Capture filename early to avoid scoping issues in exception handlers
+    filename = getattr(file, 'filename', None) if file else None
+    
     try:
         # Read file bytes
         audio_bytes = await file.read()
@@ -929,14 +1056,14 @@ async def detect_duration(file: UploadFile = File(...)):
         metadata_service = get_audio_metadata_service()
 
         # Extract metadata
-        metadata = metadata_service.analyze_bytes(audio_bytes, file.filename)
+        metadata = metadata_service.analyze_bytes(audio_bytes, filename)
 
         # Add duration in minutes for convenience
         metadata["duration_minutes"] = metadata["duration"] / 60.0
-        metadata["filename"] = file.filename
+        metadata["filename"] = filename
 
         logger.info(
-            f"Detected duration for {file.filename}: "
+            f"Detected duration for {filename}: "
             f"{metadata['duration_minutes']:.1f} min, "
             f"{metadata['format']}, {metadata['codec']}"
         )
@@ -944,7 +1071,9 @@ async def detect_duration(file: UploadFile = File(...)):
         return JSONResponse(content=metadata)
 
     except Exception as e:
-        logger.error(f"Error detecting duration for {file.filename}: {e}")
+        # Use captured filename - no need to access file in exception handler
+        filename_str = filename or 'unknown'
+        logger.error(f"Error detecting duration for {filename_str}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Error detecting duration: {str(e)}"
@@ -979,8 +1108,9 @@ async def estimate_processing_time(model: str, duration_minutes: float):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error estimating processing time: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e) if e else f"{type(e).__name__}"
+        logger.error(f"Error estimating processing time: {error_msg}", exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.post("/api/estimate-cost")
@@ -1043,6 +1173,8 @@ async def list_library():
         List of library entries with metadata
     """
     try:
+        # Reload library from disk to ensure we have latest data
+        library_service.reload()
         entries = library_service.get_all_entries()
 
         return JSONResponse(content={

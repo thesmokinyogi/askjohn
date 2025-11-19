@@ -2,7 +2,7 @@
 
 **Purpose:** Track non-critical improvements and cleanup tasks that are deferred to avoid distraction from core work.
 
-**Last Updated:** 2025-11-14
+**Last Updated:** 2025-11-17
 
 ---
 
@@ -105,6 +105,31 @@ def validate_library(self) -> Dict[str, Any]:
 ```
 **Proposed:** Implement validation logic to check for orphaned files/missing transcripts  
 **Rationale:** Useful for data integrity but not critical for current functionality.
+
+---
+
+### 8. GCS Cleanup for Transcript Files
+**Status:** Deferred  
+**Location:** `app/services/storage.py`  
+**Current:** 
+- `cleanup_old_files()` exists for audio files (`uploads/` folder)
+- No cleanup for transcript result files (`transcripts/` folder)
+- Google does NOT auto-delete incomplete/failed job result files
+
+**Proposed:** 
+- Methods already added: `cleanup_old_transcripts(days_old=30)` and `list_transcript_files()`
+- Consider: Add API endpoint or scheduled task to run cleanup
+- Consider: Set up GCS bucket lifecycle management rules (more efficient)
+
+**Rationale:** 
+- Transcript files are small (JSON), so storage impact is minimal
+- Incomplete/failed jobs will create result files that persist
+- Not urgent - can be addressed when needed
+
+**Manual Deletion Options:**
+- Via GCS Console: Navigate to bucket → `transcripts/` folder → delete files
+- Via `gsutil`: `gsutil rm gs://bucket-name/transcripts/filename.json`
+- Via code: Use `storage_service.delete_file(gcs_uri)` or `storage_service.cleanup_old_transcripts()`
 
 ---
 

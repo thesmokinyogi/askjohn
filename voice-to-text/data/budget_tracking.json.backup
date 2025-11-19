@@ -1,0 +1,291 @@
+{
+  "month": "2025-11",
+  "monthly_budget": 250.0,
+  "providers": {
+    "google": {
+      "total_cost": 9.15,
+      "free_tier_used": 60.0,
+      "free_tier_limit": 60.0,
+      "transcriptions": [
+        {
+          "timestamp": "2025-11-11T17:42:21.688322",
+          "model": "long_standard",
+          "duration_minutes": 5.61,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.61
+        },
+        {
+          "timestamp": "2025-11-13T16:31:44.501027",
+          "model": "chirp_standard",
+          "duration_minutes": 5.61,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.61
+        },
+        {
+          "timestamp": "2025-11-13T16:43:06.564041",
+          "model": "chirp_standard",
+          "duration_minutes": 5.61,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.61
+        },
+        {
+          "timestamp": "2025-11-13T17:05:25.909923",
+          "model": "chirp_standard",
+          "duration_minutes": 5.61,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.61
+        },
+        {
+          "timestamp": "2025-11-13T17:20:24.714484",
+          "model": "chirp_standard",
+          "duration_minutes": 6.14,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 6.14
+        },
+        {
+          "timestamp": "2025-11-13T17:38:56.552033",
+          "model": "chirp_standard",
+          "duration_minutes": 5.79,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.79
+        },
+        {
+          "timestamp": "2025-11-13T17:52:16.150776",
+          "model": "chirp_standard",
+          "duration_minutes": 1.79,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 1.79
+        },
+        {
+          "timestamp": "2025-11-17T14:20:51.360733",
+          "model": "long_standard",
+          "duration_minutes": 5.1,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.1
+        },
+        {
+          "timestamp": "2025-11-17T15:11:26.868175",
+          "model": "chirp_standard",
+          "duration_minutes": 4.81,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 4.81
+        },
+        {
+          "timestamp": "2025-11-17T15:22:43.966549",
+          "model": "chirp_standard",
+          "duration_minutes": 4.84,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 4.84
+        },
+        {
+          "timestamp": "2025-11-18T09:46:20.908530",
+          "model": "chirp_batch",
+          "duration_minutes": 5.27,
+          "cost": 0.0,
+          "filename": "",
+          "free_minutes_used": 5.27
+        },
+        {
+          "timestamp": "2025-11-18T09:56:40.970295",
+          "model": "chirp_batch",
+          "duration_minutes": 5.29,
+          "cost": 0.01,
+          "filename": "",
+          "free_minutes_used": 3.82
+        },
+        {
+          "timestamp": "2025-11-18T10:34:14.676990",
+          "model": "chirp_batch",
+          "duration_minutes": 4.37,
+          "cost": 0.02,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T13:56:25.540153",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:23:20.294261",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:24:29.075324",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:25:53.059941",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:28:52.507122",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:28:58.697338",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:29:44.762222",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:29:56.725363",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:30:41.055518",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:30:53.085316",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:31:45.740983",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:31:58.079621",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:32:48.236798",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:33:07.276345",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:34:02.810993",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:34:07.147497",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:59:30.533758",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T14:59:36.831901",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T15:10:30.363017",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T15:10:31.783327",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T15:11:17.446552",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T15:12:13.897709",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T15:27:48.555604",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T15:56:20.079237",
+          "model": "chirp_batch",
+          "duration_minutes": 94.32,
+          "cost": 0.38,
+          "filename": ""
+        }
+      ]
+    },
+    "whisper": {
+      "total_cost": 0.0,
+      "credit_used": 0.0,
+      "credit_limit": 5.0,
+      "transcriptions": []
+    }
+  },
+  "last_updated": "2025-11-18T15:56:20.079242"
+}

@@ -67,6 +67,12 @@ class LibraryService:
         self.library = self._load_library()
 
         logger.info(f"Library initialized: {len(self.library)} entries")
+    
+    def reload(self):
+        """Reload library from disk (useful after external changes)."""
+        self.library = self._load_library()
+        logger.info(f"Library reloaded: {len(self.library)} entries")
+        return len(self.library)
 
     def _load_library(self) -> Dict[str, Any]:
         """
@@ -276,7 +282,8 @@ class LibraryService:
                     transcript_path.unlink()
                     logger.info(f"Deleted transcript file: {transcript_file}")
                 else:
-                    logger.warning(f"Transcript file not found: {transcript_file}")
+                    # Debug level: Missing transcript files are expected after cleanup or manual deletion
+                    logger.debug(f"Transcript file not found: {transcript_file}")
 
             # Remove from library
             del self.library[library_id]

@@ -238,7 +238,8 @@ class JobStorageService:
         transcript_path = self.TRANSCRIPTS_DIR / transcript_filename
 
         if not transcript_path.exists():
-            logger.warning(f"Transcript file not found: {transcript_filename}")
+            # Debug level: Missing transcript files are expected after cleanup or manual deletion
+            logger.debug(f"Transcript file not found: {transcript_filename}")
             return None
 
         try:
@@ -366,7 +367,9 @@ class JobStorageService:
         transcript: str,
         confidence: float,
         actual_cost: float,
-        metadata: Dict[str, Any] = None
+        metadata: Dict[str, Any] = None,
+        billed_duration_minutes: Optional[float] = None,
+        billed_duration_seconds: Optional[float] = None
     ):
         """
         Mark a job as complete with results.
@@ -408,6 +411,13 @@ class JobStorageService:
             "actual_cost": actual_cost,
             "completed_at": datetime.now().isoformat()
         }
+        
+        # Store billed_duration in job record (separate from metadata to preserve data provenance)
+        # billed_duration comes from operation response, not GCS JSON metadata
+        if billed_duration_minutes is not None:
+            updates['billed_duration_minutes'] = billed_duration_minutes
+        if billed_duration_seconds is not None:
+            updates['billed_duration_seconds'] = billed_duration_seconds
 
         self.update_job(job_id, updates)
 

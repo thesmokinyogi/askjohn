@@ -140,12 +140,17 @@ class CloudStorageService:
         # Set content type based on file extension
         content_type = self._get_content_type(filename)
 
-        # Upload with extended timeout for large files (500MB max @ ~5 Mbps = ~13 min)
-        # Set 15-minute timeout to handle slow connections
+        # Upload with extended timeout for large files
+        # For 215MB @ 5 Mbps = ~6 min, but allow up to 30 minutes for slow connections
         file_size_mb = len(audio_bytes) / (1024 * 1024)
         logger.info(f"Uploading {file_size_mb:.1f} MB to GCS...")
 
-        blob.upload_from_string(audio_bytes, content_type=content_type, timeout=900)
+        # Use longer timeout for large files (30 minutes = 1800 seconds)
+        # Calculate timeout: 1 minute per 10MB, minimum 5 minutes, maximum 30 minutes
+        timeout_seconds = max(300, min(1800, int(file_size_mb * 6)))
+        logger.info(f"Using upload timeout: {timeout_seconds}s ({timeout_seconds/60:.1f} minutes)")
+
+        blob.upload_from_string(audio_bytes, content_type=content_type, timeout=timeout_seconds)
 
         # Verify upload succeeded by checking blob metadata
         blob.reload()  # Refresh metadata from GCS
@@ -155,6 +160,224 @@ class CloudStorageService:
         gcs_uri = f"gs://{self.bucket_name}/{blob_name}"
 
         logger.info(f"Uploaded audio to GCS: {gcs_uri} ({len(audio_bytes)} bytes)")
+
+        return gcs_uri, metadata
+
+    def upload_audio_from_file(
+        self, 
+        file_path: str, 
+        filename: str
+    ) -> Tuple[str, Dict]:
+        """
+        Upload audio file to Cloud Storage from file path (streaming upload).
+        
+        This method streams the file from disk to GCS without loading it into memory,
+        making it suitable for large files (200MB+).
+        
+        Args:
+            file_path: Path to file on disk
+            filename: Original filename (for extension/metadata)
+        
+        Returns:
+            Tuple of (GCS URI, audio metadata dict)
+            Metadata includes: sample_rate, channels, duration, codec
+        """
+        # Extract audio metadata from file on disk
+        metadata = {}
+        try:
+            info = mediainfo(file_path)
+            metadata = {
+                'sample_rate': int(info.get('sample_rate', 0)),
+                'channels': int(info.get('channels', 0)),
+                'duration': float(info.get('duration', 0)),
+                'codec': info.get('codec_name', 'unknown'),
+                'bit_rate': info.get('bit_rate', 'unknown')
+            }
+            logger.info(f"Audio metadata: {metadata['sample_rate']}Hz, {metadata['channels']} channels, {metadata['duration']:.1f}s")
+        except Exception as e:
+            logger.warning(f"Could not extract audio metadata: {e}")
+            # Provide defaults if extraction fails
+            metadata = {
+                'sample_rate': 16000,  # Fallback to optimal speech rate
+                'channels': 1,         # Fallback to mono
+                'duration': 0,
+                'codec': 'unknown',
+                'bit_rate': 'unknown'
+            }
+
+        # Handle video files: extract audio first
+        file_extension = os.path.splitext(filename)[1].lower()
+        upload_file_path = file_path
+        
+        # Extract audio from video files (MP4, MOV)
+        if file_extension in ['.mp4', '.mov']:
+            logger.info(f"Video file detected ({file_extension}), extracting audio...")
+            try:
+                # Extract audio using pydub (reads from disk, doesn't load into memory)
+                audio = AudioSegment.from_file(file_path, format=file_extension[1:])
+                
+                # Export to temp MP3 file
+                mp3_path = file_path + ".mp3"
+                audio.export(mp3_path, format="mp3", bitrate="128k")
+                upload_file_path = mp3_path
+                filename = filename.rsplit('.', 1)[0] + '.mp3'
+                
+                logger.info(f"✓ Extracted audio from video: {mp3_path}")
+            except Exception as e:
+                logger.error(f"Failed to extract audio from video: {e}")
+                raise
+
+        # Convert M4A to MP3 (M4A has issues with Google Speech batch_recognize)
+        elif file_extension == '.m4a':
+            logger.warning("⚠️  M4A file detected - converting to MP3 for compatibility")
+            try:
+                # Load M4A audio from disk
+                audio = AudioSegment.from_file(file_path, format="m4a")
+                
+                # Export to temp MP3 file
+                mp3_path = file_path + ".mp3"
+                audio.export(mp3_path, format="mp3", bitrate="128k")
+                upload_file_path = mp3_path
+                filename = filename.rsplit('.', 1)[0] + '.mp3'
+                
+                logger.info(f"✓ Converted M4A to MP3: {mp3_path}")
+            except Exception as e:
+                logger.error(f"Failed to convert M4A to MP3: {e}")
+                logger.warning("Attempting upload as M4A anyway...")
+
+        # Sanitize filename - replace spaces and special chars with underscores
+        # Keep only alphanumeric, dots, hyphens, underscores
+        import re
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+
+        # Create unique path with timestamp to avoid collisions
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        blob_name = f"uploads/{timestamp}_{safe_filename}"
+
+        # Upload to GCS (streaming from disk)
+        blob = self.bucket.blob(blob_name)
+
+        # Set content type based on file extension
+        content_type = self._get_content_type(filename)
+
+        # Get file size for logging and timeout calculation
+        if not os.path.exists(upload_file_path):
+            raise FileNotFoundError(f"File not found for upload: {upload_file_path}")
+        
+        if not os.path.isfile(upload_file_path):
+            raise ValueError(f"Path is not a file: {upload_file_path}")
+        
+        try:
+            file_size = os.path.getsize(upload_file_path)
+        except OSError as e:
+            raise OSError(f"Cannot access file size: {upload_file_path} - {e}")
+        
+        file_size_mb = file_size / (1024 * 1024)
+        logger.info(f"Uploading {file_size_mb:.1f} MB to GCS (streaming from disk, filename={filename})...")
+
+        # Use longer timeout for large files (30 minutes = 1800 seconds)
+        # Calculate timeout: More generous for slow connections
+        # Formula: 1 minute per 5MB (12 seconds per MB), minimum 10 minutes, maximum 30 minutes
+        # This accounts for slow upload speeds and network variability
+        timeout_seconds = max(600, min(1800, int(file_size_mb * 12)))  # 12 sec/MB = 1 min per 5MB
+        logger.info(f"Using upload timeout: {timeout_seconds}s ({timeout_seconds/60:.1f} minutes)")
+
+        # Stream from disk to GCS (no memory loading!)
+        # For large files (>5MB), use resumable uploads for better performance
+        # Use a progress-tracking file wrapper to monitor upload speed
+        try:
+            import time
+            
+            upload_start = time.time()
+            last_progress_log = upload_start
+            bytes_read = [0]  # Use list to allow modification in nested function
+            
+            logger.info(f"Starting GCS upload from {upload_file_path}...")
+            logger.info(f"Upload diagnostic: file_size={file_size} bytes ({file_size_mb:.1f} MB), timeout={timeout_seconds}s")
+            
+            # Progress-tracking file wrapper
+            class ProgressFile:
+                def __init__(self, file_obj, total_size, start_time, last_log_time, bytes_read_list):
+                    self.file_obj = file_obj
+                    self.total_size = total_size
+                    self.start_time = start_time
+                    self.last_log_time = last_log_time
+                    self.bytes_read_list = bytes_read_list
+                
+                def read(self, size=-1):
+                    chunk = self.file_obj.read(size)
+                    if chunk:
+                        self.bytes_read_list[0] += len(chunk)
+                        current_time = time.time()
+                        
+                        # Log progress every 5 seconds
+                        if current_time - self.last_log_time[0] >= 5.0:
+                            progress_pct = (self.bytes_read_list[0] / self.total_size) * 100 if self.total_size > 0 else 0
+                            elapsed = current_time - self.start_time
+                            if elapsed > 0:
+                                current_speed_mbps = (self.bytes_read_list[0] * 8) / (elapsed * 1_000_000)
+                                logger.info(
+                                    f"Upload progress: {progress_pct:.1f}% ({self.bytes_read_list[0] / (1024*1024):.1f} MB / {file_size_mb:.1f} MB) "
+                                    f"- Speed: {current_speed_mbps:.2f} Mbps - Elapsed: {elapsed:.1f}s"
+                                )
+                            self.last_log_time[0] = current_time
+                    return chunk
+                
+                def __getattr__(self, name):
+                    return getattr(self.file_obj, name)
+            
+            # Use upload_from_file with progress-tracking wrapper
+            # This gives us progress visibility and uses resumable uploads for large files
+            with open(upload_file_path, 'rb') as f:
+                progress_file = ProgressFile(f, file_size, upload_start, [last_progress_log], bytes_read)
+                blob.upload_from_file(
+                    progress_file,
+                    content_type=content_type,
+                    timeout=timeout_seconds
+                )
+            
+            upload_end = time.time()
+            upload_duration = upload_end - upload_start
+            upload_speed_mbps = (file_size * 8) / (upload_duration * 1_000_000)  # Convert to Mbps
+            
+            logger.info(f"GCS upload completed successfully in {upload_duration:.1f}s ({upload_duration/60:.1f} minutes)")
+            logger.info(f"Upload speed: {upload_speed_mbps:.2f} Mbps (file_size={file_size_mb:.1f} MB)")
+            
+            if upload_speed_mbps < 5.0:
+                logger.warning(f"⚠️  Upload speed is very slow ({upload_speed_mbps:.2f} Mbps). This may indicate:")
+                logger.warning("   - Network connectivity issues")
+                logger.warning("   - GCS bucket region is far from server")
+                logger.warning("   - upload_from_file may not be optimal for large files")
+                logger.warning("   - Consider using resumable uploads for files > 5MB")
+        except Exception as e:
+            logger.error(
+                f"GCS upload failed: {type(e).__name__}: {e} "
+                f"(file={upload_file_path}, size={file_size_mb:.1f}MB, "
+                f"timeout={timeout_seconds}s, filename={filename})",
+                exc_info=True
+            )
+            raise
+
+        # Verify upload succeeded by checking blob metadata
+        try:
+            blob.reload()  # Refresh metadata from GCS
+            logger.info(f"Verified upload - size: {blob.size} bytes, content-type: {blob.content_type}, exists: {blob.exists()}")
+        except Exception as e:
+            logger.warning(f"Could not verify upload metadata: {e}")
+            # Continue anyway - upload might have succeeded even if reload fails
+
+        # Get GCS URI
+        gcs_uri = f"gs://{self.bucket_name}/{blob_name}"
+
+        logger.info(f"Uploaded audio to GCS: {gcs_uri} ({file_size} bytes)")
+
+        # Clean up temp files (converted audio files)
+        if upload_file_path != file_path:
+            try:
+                os.unlink(upload_file_path)
+                logger.debug(f"Cleaned up temp file: {upload_file_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {upload_file_path}: {e}")
 
         return gcs_uri, metadata
 
@@ -212,6 +435,55 @@ class CloudStorageService:
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             return deleted_count
+
+    def cleanup_old_transcripts(self, days_old: int = 30) -> int:
+        """
+        Clean up transcript result files older than specified days.
+
+        Google does NOT auto-delete incomplete/failed job result files.
+        This method cleans up old transcript files from the transcripts/ folder.
+
+        Args:
+            days_old: Delete files older than this many days (default: 30)
+
+        Returns:
+            Number of files deleted
+        """
+        cutoff_date = datetime.utcnow() - timedelta(days=days_old)
+        deleted_count = 0
+
+        try:
+            # List all blobs in transcripts folder
+            blobs = self.bucket.list_blobs(prefix="transcripts/")
+
+            for blob in blobs:
+                # Check if older than cutoff
+                if blob.time_created < cutoff_date:
+                    blob.delete()
+                    deleted_count += 1
+
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old transcript files from GCS")
+
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Error during transcript cleanup: {e}")
+            return deleted_count
+
+    def list_transcript_files(self) -> list:
+        """
+        List all transcript files in GCS (for manual inspection/cleanup).
+
+        Returns:
+            List of blob names in transcripts/ folder
+        """
+        try:
+            blobs = self.bucket.list_blobs(prefix="transcripts/")
+            return [blob.name for blob in blobs]
+        except Exception as e:
+            logger.error(f"Error listing transcript files: {e}")
+            return []
 
     def _get_content_type(self, filename: str) -> str:
         """

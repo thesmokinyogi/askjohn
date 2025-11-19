@@ -1063,10 +1063,22 @@
 
             try {
                 // Submit job (returns immediately with job_id)
+                // Add timeout for large file uploads
+                // Backend timeout: max(600, min(1800, file_size_mb * 12)) seconds
+                // Frontend should match: calculate same timeout with buffer
+                const fileSizeMB = selectedFile.size / (1024 * 1024);
+                const backendTimeoutSeconds = Math.max(600, Math.min(1800, Math.floor(fileSizeMB * 12))); // 12 sec/MB = 1 min per 5MB
+                const frontendTimeoutMs = (backendTimeoutSeconds + 120) * 1000; // Add 2 minute buffer for safety
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), frontendTimeoutMs);
+                
                 const response = await fetch('/transcribe', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    signal: controller.signal
                 });
+                
+                clearTimeout(timeoutId);
 
                 const data = await response.json();
 
@@ -1086,9 +1098,14 @@
                 startPolling();
 
             } catch (err) {
-                showError(err.message);
+                if (err.name === 'AbortError') {
+                    showError('Upload timeout: File is too large or upload is taking too long. Please try again or use a smaller file.');
+                } else {
+                    showError(err.message || 'Job submission failed. Please check the console for details.');
+                }
                 loading.classList.remove('active');
                 transcribeBtn.disabled = false;
+                console.error('Transcription error:', err);
             }
         }
 
@@ -1110,7 +1127,7 @@
                 <strong>Model:</strong> ${jobData.model}<br>
                 <strong>Estimated Cost:</strong> $${jobData.estimated_cost.toFixed(2)}<br>
                 <br>
-                <em>Checking status automatically every 5 seconds...</em>
+                <em>Checking status automatically (adaptive intervals)...</em>
             `;
 
             jobStatus.classList.add('active');
@@ -1120,33 +1137,34 @@
         function startPolling() {
             pollCount = 0;
             jobStartTime = Date.now();
+            let currentInterval = 3000; // Start at 3 seconds
 
             // Check immediately
             checkJobStatus();
 
-            // Adaptive polling: Start at 3s, increase to 5s, then 8s for long jobs
-            let interval = 3000;
-            pollingInterval = setInterval(() => {
-                pollCount++;
-                checkJobStatus();
-
-                // Adaptive interval adjustment
-                if (pollCount === 5 && interval === 3000) {
-                    clearInterval(pollingInterval);
-                    interval = 5000;
-                    pollingInterval = setInterval(() => {
-                        pollCount++;
-                        checkJobStatus();
-                    }, interval);
-                } else if (pollCount === 15 && interval === 5000) {
-                    clearInterval(pollingInterval);
-                    interval = 8000;
-                    pollingInterval = setInterval(() => {
-                        pollCount++;
-                        checkJobStatus();
-                    }, interval);
-                }
-            }, interval);
+            // Adaptive polling: Start at 3s, increase to 10s, then 30s for long jobs
+            function scheduleNextCheck() {
+                pollingInterval = setTimeout(() => {
+                    pollCount++;
+                    checkJobStatus();
+                    
+                    // Adaptive interval adjustment based on poll count
+                    if (pollCount < 5) {
+                        // First 5 polls: every 3 seconds (15 seconds total)
+                        currentInterval = 3000;
+                    } else if (pollCount < 20) {
+                        // Next 15 polls: every 10 seconds (2.5 minutes total)
+                        currentInterval = 10000;
+                    } else {
+                        // After that: every 30 seconds for long-running jobs
+                        currentInterval = 30000;
+                    }
+                    
+                    scheduleNextCheck();
+                }, currentInterval);
+            }
+            
+            scheduleNextCheck();
         }
 
         // Check job status
@@ -1287,7 +1305,7 @@
         // Stop polling
         function stopPolling() {
             if (pollingInterval) {
-                clearInterval(pollingInterval);
+                clearTimeout(pollingInterval);
                 pollingInterval = null;
             }
         }

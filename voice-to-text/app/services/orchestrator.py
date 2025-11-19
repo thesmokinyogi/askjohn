@@ -12,6 +12,7 @@ This service extracts business logic from API endpoints, making them thin and fo
 """
 
 import logging
+import os
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -267,6 +268,138 @@ class TranscriptionOrchestrator:
             
             raise
     
+    def submit_transcription_from_file(
+        self,
+        file_path: str,
+        filename: str,
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Submit a transcription job from a file path (streaming upload).
+        
+        This is the streaming version that works with files on disk instead of
+        loading them into memory. This allows handling large files efficiently.
+        
+        This orchestrates the complete submission workflow:
+        1. Validate file (get size from disk)
+        2. Upload to storage (streaming from disk)
+        3. Extract metadata
+        4. Estimate cost
+        5. Submit job
+        6. Create job record
+        
+        Args:
+            file_path: Path to file on disk
+            filename: Original filename
+            model: Optional model name (uses default if not provided)
+            
+        Returns:
+            Dict with job_id, status, filename, model, duration_minutes,
+            estimated_cost, submitted_at, check_status_url
+            
+        Raises:
+            ValueError: If file validation fails
+            Exception: If submission fails
+        """
+        # Step 1: Validate file (get size from disk)
+        if not os.path.exists(file_path):
+            raise ValueError(f"File not found: {file_path}")
+        
+        if not os.path.isfile(file_path):
+            raise ValueError(f"Path is not a file: {file_path}")
+        
+        try:
+            file_size = Path(file_path).stat().st_size
+        except OSError as e:
+            raise ValueError(f"Cannot access file: {file_path} - {e}")
+        
+        self.validate_file(filename, file_size)
+        logger.info(f"Processing file from disk: {filename} ({file_size} bytes)")
+        
+        # Step 2: Upload to storage and extract metadata (streaming from disk)
+        gcs_uri = None
+        try:
+            if self.test_mode:
+                logger.warning("⚠️  TEST MODE: Skipping upload, using cached file")
+                gcs_uri = self.test_gcs_uri
+                audio_metadata = self.test_audio_metadata or {}
+            else:
+                logger.info("Uploading to Cloud Storage (streaming from disk)...")
+                gcs_uri, audio_metadata = self.storage_service.upload_audio_from_file(
+                    file_path, filename
+                )
+                logger.info(f"Uploaded to: {gcs_uri}")
+            
+            # Step 3: Map model name and extract tier
+            google_api_model, selected_model, tier = self.map_model_name(model)
+            
+            # Step 4: Calculate estimated cost
+            duration_minutes = audio_metadata.get('duration', 0) / 60.0
+            free_tier_remaining = self.budget_service.get_free_tier_remaining(self.provider)
+            
+            cost_estimate = self.pricing_service.estimate_cost(
+                provider=self.provider,
+                model=selected_model,
+                duration_minutes=duration_minutes,
+                free_tier_remaining=free_tier_remaining
+            )
+            
+            logger.info(
+                f"Estimated cost: ${cost_estimate['total_cost']:.2f} "
+                f"({cost_estimate['billable_minutes']:.1f} min @ ${cost_estimate['cost_per_minute']}/min)"
+            )
+            
+            # Step 5: Submit transcription job
+            # Create transcription service with the correct model
+            model_transcription_service = self.transcription_service_factory(
+                project_id=self.project_id,
+                model=google_api_model,
+                location=self.speech_location
+            )
+            logger.info(f"Submitting transcription job with model: {google_api_model}")
+            operation = model_transcription_service.submit_job(
+                gcs_uri=gcs_uri,
+                audio_metadata=audio_metadata
+            )
+            
+            job_id = operation.operation.name
+            logger.info(f"Job submitted successfully: {job_id}")
+            
+            # Step 6: Create job record
+            job_record = self.job_storage.create_job(
+                job_id=job_id,
+                filename=filename,
+                model=selected_model,
+                tier=tier,
+                duration_minutes=duration_minutes,
+                estimated_cost=cost_estimate['total_cost'],
+                gcs_uri=gcs_uri
+            )
+            
+            # Step 7: Return result
+            return {
+                "job_id": job_id,
+                "status": "queued",
+                "filename": filename,
+                "model": selected_model,
+                "duration_minutes": round(duration_minutes, 1),
+                "estimated_cost": cost_estimate['total_cost'],
+                "submitted_at": job_record["submitted_at"],
+                "check_status_url": f"/api/jobs/{job_id}/status"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error submitting transcription job: {e}")
+            
+            # Clean up uploaded file on error
+            if gcs_uri and not self.test_mode:
+                try:
+                    self.storage_service.delete_file(gcs_uri)
+                except:
+                    pass  # Best effort cleanup
+            
+            raise
+    
     def check_job_status(
         self,
         job_id: str,
@@ -364,8 +497,8 @@ class TranscriptionOrchestrator:
         logger.info(f"Job {job_id} completed successfully")
         
         # Calculate actual cost from billed duration using cost calculation service
-        metadata = status_result.get("metadata", {})
-        billed_duration_minutes = metadata.get("billed_duration_minutes")
+        # billed_duration comes from operation response, not GCS JSON metadata
+        billed_duration_minutes = status_result.get("billed_duration_minutes")
         
         cost_result = self.cost_calculation_service.calculate_actual_cost(
             provider=self.provider,
@@ -379,17 +512,45 @@ class TranscriptionOrchestrator:
         actual_free_minutes_used = cost_result["actual_free_minutes_used"]
         billed_duration_minutes = cost_result["billed_duration_minutes"]  # Use the value from result (may be estimated)
         
+        # CRITICAL: Check if job was already completed and recorded
+        # This prevents duplicate cost recording and library entries
+        # Check BEFORE updating job record to avoid race conditions
+        if job_record.get("actual_cost") is not None:
+            logger.warning(f"Job {job_id} already has actual_cost recorded (${job_record.get('actual_cost'):.2f}). Skipping duplicate completion processing.")
+            # Return the existing job data
+            updated_job = self.job_storage.get_job(job_id, include_transcript=True)
+            return {
+                "job_id": job_id,
+                "done": True,
+                "status": "complete",
+                "filename": updated_job["filename"],
+                "model": updated_job["model"],
+                "submitted_at": updated_job["submitted_at"],
+                "completed_at": updated_job.get("completed_at"),
+                "transcript": updated_job.get("transcript"),
+                "confidence": updated_job.get("confidence"),
+                "actual_cost": updated_job.get("actual_cost"),
+                "metadata": updated_job.get("metadata", {})
+            }
+        
         # Update job record with results
+        # Keep GCS JSON metadata pristine - only include GCS-derived data in transcript file
         metadata_with_words = status_result.get("metadata", {}).copy()
         if "words" in status_result:
             metadata_with_words["words"] = status_result["words"]
+        
+        # Note: billed_duration is NOT added to metadata - it comes from operation response, not GCS JSON
+        # It will be extracted separately and stored in job record (not transcript file metadata)
         
         self.job_storage.mark_complete(
             job_id=job_id,
             transcript=status_result["transcript"],
             confidence=status_result["confidence"],
             actual_cost=actual_cost,
-            metadata=metadata_with_words
+            metadata=metadata_with_words,
+            # Pass billed_duration separately to preserve data provenance
+            billed_duration_minutes=status_result.get("billed_duration_minutes"),
+            billed_duration_seconds=status_result.get("billed_duration_seconds")
         )
         
         # Record processing time for feedback loop
@@ -410,7 +571,8 @@ class TranscriptionOrchestrator:
             job_id=job_id
         )
         
-        # Update budget
+        # Update budget - only record once (we already checked actual_cost is None above)
+        logger.info(f"Recording transcription cost for job {job_id}: ${actual_cost:.2f}")
         self.budget_service.record_transcription(
             provider=self.provider,
             model=job_record["model"],

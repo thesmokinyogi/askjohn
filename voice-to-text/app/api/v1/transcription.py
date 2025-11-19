@@ -5,7 +5,10 @@ Handles transcription submission and audio metadata detection.
 """
 
 import logging
-from fastapi import APIRouter, Depends, File, UploadFile, Form
+import tempfile
+import os
+from pathlib import Path
+from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Optional
 
@@ -52,30 +55,98 @@ async def transcribe_audio(
     Returns:
         TranscriptionResponse with job_id, status, and estimated cost
     """
+    # Stream file to temp file instead of loading into memory
+    # This allows handling large files without memory issues
+    # Capture filename early to avoid scoping issues in exception handlers
+    filename = getattr(file, 'filename', None) if file else None
+    temp_path = None
+    
     try:
-        # Read file bytes
-        audio_bytes = await file.read()
+        # Validate file object
+        if not file:
+            raise HTTPException(status_code=400, detail="File is required")
         
-        # Submit transcription using orchestrator
-        result = orchestrator.submit_transcription(
-            filename=file.filename,
-            audio_bytes=audio_bytes,
+        if not filename:
+            raise HTTPException(status_code=400, detail="Filename is required")
+        
+        # Get file extension for temp file
+        file_extension = Path(filename).suffix or '.tmp'
+        
+        # Stream upload to temp file (chunk by chunk, ~8KB buffer)
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+                temp_path = temp_file.name
+                chunk_size = 8192  # 8KB chunks
+                total_size = 0
+                
+                # Stream file to disk
+                while True:
+                    try:
+                        chunk = await file.read(chunk_size)
+                        if not chunk:
+                            break
+                        temp_file.write(chunk)
+                        total_size += len(chunk)
+                    except Exception as e:
+                        logger.error(f"Error reading/writing file chunk: {e}", exc_info=True)
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Error processing file upload: {str(e)}"
+                        )
+        except OSError as e:
+            logger.error(f"Error creating/writing temp file: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error writing file to disk: {str(e)}"
+            )
+        
+        # Verify temp file was created and get size
+        if not os.path.exists(temp_path):
+            logger.error(f"Temp file was not created: {temp_path}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create temporary file"
+            )
+        
+        file_size = os.path.getsize(temp_path)
+        logger.info(f"Streamed file to temp: {temp_path} ({file_size} bytes, filename={filename})")
+        
+        # Submit transcription using orchestrator (from file path, not memory)
+        result = orchestrator.submit_transcription_from_file(
+            file_path=temp_path,
+            filename=filename,
             model=model
         )
         
         return TranscriptionResponse(**result)
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (already properly formatted)
+        raise
     except ValueError as e:
         # Validation errors from orchestrator
-        from fastapi import HTTPException
+        logger.error(f"Validation error: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error submitting transcription job: {e}")
-        from fastapi import HTTPException
+        # Use captured filename - no need to access file in exception handler
+        filename_str = filename or 'unknown'
+        logger.error(
+            f"Error submitting transcription job: {e} "
+            f"(filename={filename_str}, temp_path={temp_path})",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=500,
             detail=f"Error submitting transcription: {str(e)}"
         )
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                logger.debug(f"Cleaned up temp file: {temp_path}")
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
 
 
 @router.post("/detect-duration", response_model=AudioMetadataResponse)
@@ -95,19 +166,22 @@ async def detect_duration(
     Returns:
         AudioMetadataResponse with duration, format, codec, sample_rate, etc.
     """
+    # Capture filename early to avoid scoping issues in exception handlers
+    filename = getattr(file, 'filename', None) if file else None
+    
     try:
         # Read file bytes
         audio_bytes = await file.read()
         
         # Extract metadata
-        metadata = metadata_service.analyze_bytes(audio_bytes, file.filename)
+        metadata = metadata_service.analyze_bytes(audio_bytes, filename)
         
         # Add duration in minutes for convenience
         metadata["duration_minutes"] = metadata["duration"] / 60.0
-        metadata["filename"] = file.filename
+        metadata["filename"] = filename
         
         logger.info(
-            f"Detected duration for {file.filename}: "
+            f"Detected duration for {filename}: "
             f"{metadata['duration_minutes']:.1f} min, "
             f"{metadata['format']}, {metadata['codec']}"
         )
@@ -115,8 +189,9 @@ async def detect_duration(
         return AudioMetadataResponse(**metadata)
         
     except Exception as e:
-        logger.error(f"Error detecting duration for {file.filename}: {e}")
-        from fastapi import HTTPException
+        # Use captured filename - no need to access file in exception handler
+        filename_str = filename or 'unknown'
+        logger.error(f"Error detecting duration for {filename_str}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Error detecting duration: {str(e)}"
