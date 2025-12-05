@@ -2,7 +2,7 @@
 
 **Purpose:** Track non-critical improvements and cleanup tasks that are deferred to avoid distraction from core work.
 
-**Last Updated:** 2025-11-17
+**Last Updated:** 2025-11-18
 
 ---
 
@@ -54,7 +54,33 @@ model_mapping = {
 
 ## Low Priority
 
-### 4. Standardize Cache Key Format
+### 4. Schedule Weekly Cleanup Job
+**Status:** Deferred  
+**Location:** `scripts/cleanup_jobs.py`  
+**Current:** Manual execution only  
+**Proposed:** 
+- **Option A (Recommended):** Cron job - runs every Sunday at 2 AM
+  - Wrapper script created: `scripts/run_cleanup.sh`
+  - Documentation: `docs/CLEANUP_CRON_SETUP.md`
+  - Command: `0 2 * * 0 /path/to/scripts/run_cleanup.sh >> logs/cleanup.log 2>&1`
+- **Option B:** Background task in FastAPI using APScheduler
+  - Integrated with app, but only runs when app is running
+  - Requires adding `APScheduler` dependency
+
+**Rationale:** 
+- Cleanup script is ready and tested
+- Weekly schedule prevents accumulation of stuck jobs, duplicates, orphaned files
+- Cron job is recommended for reliability (runs independently of app)
+- See `docs/CLEANUP_SCHEDULING_OPTIONS.md` for full comparison
+
+**Next Steps:**
+1. Test wrapper script: `./scripts/run_cleanup.sh --dry-run`
+2. Add to crontab: `crontab -e`
+3. Monitor logs: `tail -f logs/cleanup.log`
+
+---
+
+### 5. Standardize Cache Key Format
 **Status:** Deferred  
 **Location:** `app/services/transcribe_v2.py` - `_FEATURE_CACHE`  
 **Current:** Mixed cache key formats  
@@ -63,7 +89,7 @@ model_mapping = {
 
 ---
 
-### 5. Clean Up DEBUG Logging
+### 6. Clean Up DEBUG Logging
 **Status:** Deferred  
 **Location:** `app/services/transcribe_v2.py` (multiple locations)  
 **Current:** Extensive DEBUG print statements  
@@ -72,7 +98,7 @@ model_mapping = {
 
 ---
 
-### 6. Implement V2 Phrase Hints
+### 7. Implement V2 Phrase Hints
 **Status:** Deferred  
 **Location:** `app/services/transcribe_v2.py:1186, 1198`  
 **Current:** Commented out with TODO:
@@ -86,7 +112,7 @@ model_mapping = {
 
 ---
 
-### 7. Implement Library Validation
+### 8. Implement Library Validation
 **Status:** Deferred  
 **Location:** `app/services/library.py:310`  
 **Current:** Stub function returns placeholder:
@@ -108,7 +134,7 @@ def validate_library(self) -> Dict[str, Any]:
 
 ---
 
-### 8. GCS Cleanup for Transcript Files
+### 9. GCS Cleanup for Transcript Files
 **Status:** Deferred  
 **Location:** `app/services/storage.py`  
 **Current:** 

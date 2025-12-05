@@ -281,11 +281,16 @@ class CloudStorageService:
         )
         
         logger.info(f"Audio processing complete: {metadata['sample_rate']}Hz, {metadata['channels']} channels, {metadata['duration']:.1f}s")
+        
+        # Determine the actual file being uploaded (may be extracted audio, not original video)
+        upload_filename = os.path.basename(upload_file_path)
+        logger.info(f"Uploading processed file: {upload_filename} (original: {filename})")
 
         # Sanitize filename - replace spaces and special chars with underscores
         # Keep only alphanumeric, dots, hyphens, underscores
+        # Use the actual upload filename (extracted audio) not original video filename
         import re
-        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', upload_filename)
 
         # Create unique path with timestamp to avoid collisions
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -294,8 +299,8 @@ class CloudStorageService:
         # Upload to GCS (streaming from disk)
         blob = self.bucket.blob(blob_name)
 
-        # Set content type based on file extension
-        content_type = self._get_content_type(filename)
+        # Set content type based on actual file being uploaded (extracted audio, not original video)
+        content_type = self._get_content_type(upload_filename)
 
         # Get file size for logging and timeout calculation
         if not os.path.exists(upload_file_path):
@@ -309,8 +314,26 @@ class CloudStorageService:
         except OSError as e:
             raise OSError(f"Cannot access file size: {upload_file_path} - {e}")
         
+        # Validate duration (Google's actual limit for batch API is 8 hours per file)
+        # Reference: https://cloud.google.com/speech-to-text/docs/quotas
+        # Batch requests: up to 8 hours per file, stored in Cloud Storage
+        # No file size limit - only duration limit
+        duration_seconds = metadata.get('duration', 0)
+        duration_hours = duration_seconds / 3600
+        max_duration_hours = 8.0  # Google's limit for batch API
+        
+        if duration_hours > max_duration_hours:
+            raise ValueError(
+                f"Audio duration too long: {duration_hours:.1f} hours. "
+                f"Maximum duration: {max_duration_hours} hours per file. "
+                f"Please split your audio file into smaller segments."
+            )
+        
         file_size_mb = file_size / (1024 * 1024)
-        logger.info(f"Uploading {file_size_mb:.1f} MB to GCS (streaming from disk, filename={filename})...")
+        logger.info(
+            f"Uploading {file_size_mb:.1f} MB ({duration_hours:.2f} hours) to GCS "
+            f"(processed_file={os.path.basename(upload_file_path)}, original_filename={filename})..."
+        )
 
         # Use longer timeout for large files (30 minutes = 1800 seconds)
         # Calculate timeout: More generous for slow connections

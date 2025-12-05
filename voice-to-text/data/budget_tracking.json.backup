@@ -3,7 +3,7 @@
   "monthly_budget": 250.0,
   "providers": {
     "google": {
-      "total_cost": 9.15,
+      "total_cost": 9.75,
       "free_tier_used": 60.0,
       "free_tier_limit": 60.0,
       "transcriptions": [
@@ -277,6 +277,20 @@
           "duration_minutes": 94.32,
           "cost": 0.38,
           "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T17:31:16.481765",
+          "model": "chirp_batch",
+          "duration_minutes": 88.09,
+          "cost": 0.35,
+          "filename": ""
+        },
+        {
+          "timestamp": "2025-11-18T18:03:19.585732",
+          "model": "chirp_batch",
+          "duration_minutes": 63.09,
+          "cost": 0.25,
+          "filename": ""
         }
       ]
     },
@@ -287,5 +301,5 @@
       "transcriptions": []
     }
   },
-  "last_updated": "2025-11-18T15:56:20.079242"
+  "last_updated": "2025-11-18T18:03:19.585737"
 }

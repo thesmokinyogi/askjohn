@@ -648,7 +648,7 @@
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📁</div>
             <div class="upload-text">Click to upload or drag & drop</div>
-            <div class="upload-hint">MP3, WAV, M4A, OGG, FLAC • Up to 8 hours</div>
+            <div class="upload-hint">MP3, WAV, M4A, OGG, FLAC, MP4, MOV • Up to 8 hours</div>
             <div class="filename" id="filename"></div>
         </div>
 
@@ -795,21 +795,62 @@
         let pollCount = 0; // Track number of polls for intelligent messaging
         let jobStartTime = null; // Track when job started
 
-        // DOM elements
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const transcribeBtn = document.getElementById('transcribeBtn');
-        const filename = document.getElementById('filename');
-        const costPreview = document.getElementById('costPreview');
-        const loading = document.getElementById('loading');
-        const results = document.getElementById('results');
-        const error = document.getElementById('error');
-        const advancedToggle = document.getElementById('advancedToggle');
-        const advancedContent = document.getElementById('advancedContent');
-        const toggleIcon = document.getElementById('toggleIcon');
+        // DOM elements - cached for performance and consistency
+        // These will be initialized in init() after DOM is ready
+        let uploadArea, fileInput, transcribeBtn, filename, costPreview, loading, results, error;
+        let advancedToggle, advancedContent, toggleIcon;
+        let budgetTotal, providersGrid, modelList, stereoCard, modelName, modelBadge;
+        let costValue, costBreakdown, jobStatus, jobId, jobMessage;
+        let transcript, confidence, wordCount, duration, actualCost;
+
+        // Cache DOM elements (call after DOM is ready)
+        function cacheDOMElements() {
+            uploadArea = document.getElementById('uploadArea');
+            fileInput = document.getElementById('fileInput');
+            transcribeBtn = document.getElementById('transcribeBtn');
+            filename = document.getElementById('filename');
+            costPreview = document.getElementById('costPreview');
+            loading = document.getElementById('loading');
+            results = document.getElementById('results');
+            error = document.getElementById('error');
+            advancedToggle = document.getElementById('advancedToggle');
+            advancedContent = document.getElementById('advancedContent');
+            toggleIcon = document.getElementById('toggleIcon');
+            // Additional frequently-used elements
+            budgetTotal = document.getElementById('budgetTotal');
+            providersGrid = document.getElementById('providersGrid');
+            modelList = document.getElementById('modelList');
+            stereoCard = document.getElementById('stereoCard');
+            modelName = document.getElementById('modelName');
+            modelBadge = document.getElementById('modelBadge');
+            costValue = document.getElementById('costValue');
+            costBreakdown = document.getElementById('costBreakdown');
+            jobStatus = document.getElementById('jobStatus');
+            jobId = document.getElementById('jobId');
+            jobMessage = document.getElementById('jobMessage');
+            transcript = document.getElementById('transcript');
+            confidence = document.getElementById('confidence');
+            wordCount = document.getElementById('wordCount');
+            duration = document.getElementById('duration');
+            actualCost = document.getElementById('actualCost');
+            
+            // Debug: Log critical elements to verify they exist
+            console.log('DOM elements cached:', {
+                uploadArea: !!uploadArea,
+                fileInput: !!fileInput,
+                transcribeBtn: !!transcribeBtn,
+                budgetTotal: !!budgetTotal
+            });
+            if (!uploadArea) console.error('❌ uploadArea element not found');
+            if (!fileInput) console.error('❌ fileInput element not found');
+            if (!transcribeBtn) console.error('❌ transcribeBtn element not found');
+            if (!budgetTotal) console.error('❌ budgetTotal element not found');
+        }
 
         // Initialize
         async function init() {
+            // Cache DOM elements first (DOM is ready when script runs at end of body)
+            cacheDOMElements();
             await loadPricing();
             await loadBudget();
             renderModels();
@@ -880,8 +921,14 @@
         // Load budget from API
         async function loadBudget() {
             try {
+                console.log('Loading budget from /api/budget...');
                 const response = await fetch('/api/budget');
+                if (!response.ok) {
+                    console.error('Budget API error:', response.status, response.statusText);
+                    return;
+                }
                 budgetData = await response.json();
+                console.log('Budget data loaded:', budgetData);
                 updateBudgetDisplay();
             } catch (err) {
                 console.error('Error loading budget:', err);
@@ -890,20 +937,36 @@
 
         // Update budget display
         function updateBudgetDisplay() {
-            if (!budgetData) return;
+            if (!budgetData) {
+                console.warn('updateBudgetDisplay called but budgetData is null/undefined');
+                return;
+            }
+
+            console.log('Updating budget display:', {
+                total_spent: budgetData.total_spent,
+                monthly_budget: budgetData.monthly_budget,
+                budgetTotal: !!budgetTotal
+            });
 
             // Update total costs
-            document.getElementById('budgetTotal').textContent =
-                `$${budgetData.total_spent.toFixed(2)} / $${budgetData.monthly_budget.toFixed(0)}`;
+            if (budgetTotal) {
+                const spent = budgetData.total_spent || 0;
+                const budget = budgetData.monthly_budget || 250;
+                budgetTotal.textContent = `$${spent.toFixed(2)} / $${budget.toFixed(0)}`;
+                console.log('Budget display updated:', budgetTotal.textContent);
+            } else {
+                console.error('budgetTotal element not found');
+            }
 
             // Render provider cards
-            const providersGrid = document.getElementById('providersGrid');
-            providersGrid.innerHTML = '';
+            if (providersGrid) {
+                providersGrid.innerHTML = '';
 
-            if (budgetData.providers) {
-                for (const [providerName, providerData] of Object.entries(budgetData.providers)) {
-                    const card = createProviderCard(providerName, providerData);
-                    providersGrid.appendChild(card);
+                if (budgetData.providers) {
+                    for (const [providerName, providerData] of Object.entries(budgetData.providers)) {
+                        const card = createProviderCard(providerName, providerData);
+                        providersGrid.appendChild(card);
+                    }
                 }
             }
         }
@@ -984,43 +1047,44 @@
             if (!pricingData) return;
 
             const googleModels = pricingData.providers.google.models;
-            const modelList = document.getElementById('modelList');
-            modelList.innerHTML = '';
+            if (modelList) {
+                modelList.innerHTML = '';
 
-            // Order: chirp_batch, long_batch, chirp_standard, long_standard
-            const modelOrder = ['chirp_batch', 'long_batch', 'chirp_standard', 'long_standard'];
+                // Order: chirp_batch, long_batch, chirp_standard, long_standard
+                const modelOrder = ['chirp_batch', 'long_batch', 'chirp_standard', 'long_standard'];
 
-            modelOrder.forEach((modelKey, index) => {
-                const model = googleModels[modelKey];
-                if (!model) return;
+                modelOrder.forEach((modelKey, index) => {
+                    const model = googleModels[modelKey];
+                    if (!model) return;
 
-                const div = document.createElement('div');
-                div.className = 'model-option' + (index === 0 ? ' selected' : '');
-                div.onclick = function() { selectModel(modelKey, this); };
+                    const div = document.createElement('div');
+                    div.className = 'model-option' + (index === 0 ? ' selected' : '');
+                    div.onclick = function() { selectModel(modelKey, this); };
 
-                const badges = [];
-                if (index === 0) badges.push('<div class="model-badge badge-default">Default</div>');
-                if (modelKey.includes('batch')) badges.push('<div class="model-badge badge-savings">75% Off</div>');
-                if (modelKey.includes('chirp') && !modelKey.includes('batch')) badges.push('<div class="model-badge badge-premium">Best</div>');
+                    const badges = [];
+                    if (index === 0) badges.push('<div class="model-badge badge-default">Default</div>');
+                    if (modelKey.includes('batch')) badges.push('<div class="model-badge badge-savings">75% Off</div>');
+                    if (modelKey.includes('chirp') && !modelKey.includes('batch')) badges.push('<div class="model-badge badge-premium">Best</div>');
 
-                div.innerHTML = `
-                    <div class="model-info">
-                        <div class="model-name-line">
-                            <div class="model-name">${model.display_name}</div>
-                            ${badges.join('')}
+                    div.innerHTML = `
+                        <div class="model-info">
+                            <div class="model-name-line">
+                                <div class="model-name">${model.display_name}</div>
+                                ${badges.join('')}
+                            </div>
+                            <div class="model-description">
+                                ${model.features.join(' • ')}
+                            </div>
                         </div>
-                        <div class="model-description">
-                            ${model.features.join(' • ')}
+                        <div class="model-cost">
+                            <div class="model-price">$${model.cost_per_min.toFixed(3)}</div>
+                            <div class="model-time">per min</div>
                         </div>
-                    </div>
-                    <div class="model-cost">
-                        <div class="model-price">$${model.cost_per_min.toFixed(3)}</div>
-                        <div class="model-time">per min</div>
-                    </div>
-                `;
+                    `;
 
-                modelList.appendChild(div);
-            });
+                    modelList.appendChild(div);
+                });
+            }
         }
 
         // Select model
@@ -1047,8 +1111,6 @@
 
         // Show/hide channel selection based on file channels
         function updateChannelSelectionVisibility() {
-            const stereoCard = document.getElementById('stereoCard');
-            
             console.log('updateChannelSelectionVisibility called:', {
                 fileChannels,
                 stereoCard: !!stereoCard
@@ -1104,95 +1166,184 @@
             const model = pricingData.providers.google.models[selectedModel];
             if (!model) return;
 
-            document.getElementById('modelName').textContent = model.display_name;
+            if (modelName) {
+                modelName.textContent = model.display_name;
+            }
 
-            const badge = document.getElementById('modelBadge');
-
-            if (selectedModel.includes('batch')) {
-                badge.textContent = '75% Off';
-                badge.style.background = '#f59e0b';
-                badge.style.display = 'inline-block';
-            } else if (selectedModel.includes('chirp')) {
-                badge.textContent = 'Best';
-                badge.style.background = '#8b5cf6';
-                badge.style.display = 'inline-block';
-            } else {
-                badge.style.display = 'none';
+            if (modelBadge) {
+                if (selectedModel.includes('batch')) {
+                    modelBadge.textContent = '75% Off';
+                    modelBadge.style.background = '#f59e0b';
+                    modelBadge.style.display = 'inline-block';
+                } else if (selectedModel.includes('chirp')) {
+                    modelBadge.textContent = 'Best';
+                    modelBadge.style.background = '#8b5cf6';
+                    modelBadge.style.display = 'inline-block';
+                } else {
+                    modelBadge.style.display = 'none';
+                }
             }
         }
 
         // Setup event listeners
         function setupEventListeners() {
+            console.log('Setting up event listeners...', {
+                uploadArea: !!uploadArea,
+                fileInput: !!fileInput,
+                transcribeBtn: !!transcribeBtn
+            });
+            
             // Upload area click
-            uploadArea.addEventListener('click', () => fileInput.click());
+            if (uploadArea && fileInput) {
+                uploadArea.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Upload area clicked, triggering file input');
+                    fileInput.click();
+                });
+            } else {
+                console.error('Cannot set up click handler - missing elements:', {
+                    uploadArea: !!uploadArea,
+                    fileInput: !!fileInput
+                });
+            }
 
             // File selection
-            fileInput.addEventListener('change', async (e) => {
-                if (e.target.files.length > 0) {
-                    selectedFile = e.target.files[0];
-                    filename.textContent = selectedFile.name;
-                    results.classList.remove('active');
-                    error.classList.remove('active');
+            if (fileInput) {
+                fileInput.addEventListener('change', async (e) => {
+                    if (e.target.files.length > 0) {
+                        selectedFile = e.target.files[0];
+                        if (filename) filename.textContent = selectedFile.name;
+                        if (results) results.classList.remove('active');
+                        if (error) error.classList.remove('active');
 
-                    // Detect duration
-                    await detectDuration(selectedFile);
+                        // Enable button immediately (don't wait for metadata)
+                        if (transcribeBtn) transcribeBtn.disabled = false;
 
-                    transcribeBtn.disabled = false;
-                }
-            });
+                        // Detect duration in background (non-blocking)
+                        detectDuration(selectedFile).catch(err => {
+                            console.error('Background metadata detection failed:', err);
+                            // Non-critical: transcription can proceed without metadata
+                        });
+                    }
+                });
+            }
 
             // Drag and drop
-            uploadArea.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadArea.classList.add('dragover');
-            });
+            if (uploadArea) {
+                // Prevent default drag behavior on document to stop browser from opening files
+                // Only prevent if dragging files (not other content)
+                const handleDocumentDrag = (e) => {
+                    // Only prevent if it's a file drag operation
+                    if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                };
+                
+                document.addEventListener('dragover', handleDocumentDrag, false);
+                document.addEventListener('drop', handleDocumentDrag, false);
+                
+                uploadArea.addEventListener('dragenter', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    uploadArea.classList.add('dragover');
+                });
+                
+                uploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = 'copy';
+                    uploadArea.classList.add('dragover');
+                });
 
-            uploadArea.addEventListener('dragleave', () => {
-                uploadArea.classList.remove('dragover');
-            });
+                uploadArea.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Only remove dragover if we're actually leaving the upload area
+                    const rect = uploadArea.getBoundingClientRect();
+                    const x = e.clientX;
+                    const y = e.clientY;
+                    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                        uploadArea.classList.remove('dragover');
+                    }
+                });
 
-            uploadArea.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                uploadArea.classList.remove('dragover');
+                uploadArea.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    uploadArea.classList.remove('dragover');
+                    console.log('File dropped:', e.dataTransfer.files.length, 'files');
 
-                if (e.dataTransfer.files.length > 0) {
-                    selectedFile = e.dataTransfer.files[0];
-                    filename.textContent = selectedFile.name;
-                    results.classList.remove('active');
-                    error.classList.remove('active');
+                    if (e.dataTransfer.files.length > 0) {
+                        selectedFile = e.dataTransfer.files[0];
+                        if (filename) filename.textContent = selectedFile.name;
+                        if (results) results.classList.remove('active');
+                        if (error) error.classList.remove('active');
 
-                    // Detect duration
-                    await detectDuration(selectedFile);
+                        // Enable button immediately (don't wait for metadata)
+                        if (transcribeBtn) transcribeBtn.disabled = false;
 
-                    transcribeBtn.disabled = false;
-                }
-            });
+                        // Detect duration in background (non-blocking)
+                        detectDuration(selectedFile).catch(err => {
+                            console.error('Background metadata detection failed:', err);
+                            // Non-critical: transcription can proceed without metadata
+                        });
+                    }
+                });
+            }
 
             // Advanced toggle
-            advancedToggle.addEventListener('click', () => {
-                advancedContent.classList.toggle('expanded');
-                toggleIcon.classList.toggle('expanded');
-            });
+            if (advancedToggle && advancedContent && toggleIcon) {
+                advancedToggle.addEventListener('click', () => {
+                    advancedContent.classList.toggle('expanded');
+                    toggleIcon.classList.toggle('expanded');
+                });
+            }
 
             // Channel selection event listeners (for stereo card)
             // Note: We'll set these up dynamically when the stereo card appears
 
             // Transcribe button
-            transcribeBtn.addEventListener('click', transcribeAudio);
+            if (transcribeBtn) {
+                transcribeBtn.addEventListener('click', transcribeAudio);
+            }
         }
 
         // Detect audio duration using server-side metadata extraction
         async function detectDuration(file) {
+            // Show subtle indicator that metadata is being detected
+            if (costPreview) {
+                costPreview.classList.add('active');
+                if (costValue) {
+                    costValue.textContent = 'Detecting file info...';
+                    costValue.style.fontSize = '12px';
+                    costValue.style.opacity = '0.7';
+                }
+            }
+
             try {
                 // Create form data with the audio file
                 const formData = new FormData();
                 formData.append('file', file);
 
+                // Dynamic timeout based on file size
+                // For large video files, metadata extraction can take longer
+                // Formula: 1 second per MB, minimum 30 seconds, maximum 5 minutes
+                const fileSizeMB = file.size / (1024 * 1024);
+                const timeoutMs = Math.max(30000, Math.min(300000, fileSizeMB * 1000)); // 30s to 5min
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
                 // Call server endpoint to extract metadata
                 const response = await fetch('/api/detect-duration', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
 
                 if (!response.ok) {
                     throw new Error('Failed to detect duration');
@@ -1217,13 +1368,21 @@
                 // Show/hide channel selection based on file channels
                 updateChannelSelectionVisibility();
 
-                // Update cost estimate
+                // Update cost estimate (will restore normal styling)
                 updateCostEstimate();
 
             } catch (err) {
                 console.error('Error detecting duration:', err);
                 fileDurationMinutes = 0;
-                costPreview.classList.remove('active');
+                // Hide cost preview if detection failed
+                if (costPreview) {
+                    costPreview.classList.remove('active');
+                }
+                // If timeout, show a message but don't block transcription
+                if (err.name === 'AbortError') {
+                    console.warn('Metadata detection timed out - transcription can proceed without cost estimate');
+                    // Don't show error to user - transcription can proceed without metadata
+                }
             }
         }
 
@@ -1251,17 +1410,23 @@
                 const isFree = estimate.total_cost === 0 && estimate.free_minutes_used > 0;
 
                 // Update cost preview breakdown
-                document.getElementById('costBreakdown').textContent =
-                    `${Math.round(estimate.total_minutes)} min total • ` +
-                    `${Math.round(estimate.free_minutes_used)} min free • ` +
-                    `${Math.round(estimate.billable_minutes)} min billable @ $${estimate.cost_per_minute}/min`;
+                if (costBreakdown) {
+                    costBreakdown.textContent =
+                        `${Math.round(estimate.total_minutes)} min total • ` +
+                        `${Math.round(estimate.free_minutes_used)} min free • ` +
+                        `${Math.round(estimate.billable_minutes)} min billable @ $${estimate.cost_per_minute}/min`;
+                }
 
                 // Update cost value - show "FREE" if covered by free tier
-                const costValueEl = document.getElementById('costValue');
-                if (isFree) {
-                    costValueEl.innerHTML = `<span style="color: #10b981; font-weight: 700;">FREE</span> <span style="font-size: 12px; color: #059669;">(covered by free tier)</span>`;
-                } else {
-                    costValueEl.textContent = `$${estimate.total_cost.toFixed(2)}`;
+                if (costValue) {
+                    // Restore normal styling (in case it was showing "Detecting file info...")
+                    costValue.style.fontSize = '';
+                    costValue.style.opacity = '';
+                    if (isFree) {
+                        costValue.innerHTML = `<span style="color: #10b981; font-weight: 700;">FREE</span> <span style="font-size: 12px; color: #059669;">(covered by free tier)</span>`;
+                    } else {
+                        costValue.textContent = `$${estimate.total_cost.toFixed(2)}`;
+                    }
                 }
 
                 // Update button text
@@ -1289,7 +1454,9 @@
             // Reset UI
             error.classList.remove('active');
             results.classList.remove('active');
-            document.getElementById('jobStatus').classList.remove('active');
+            if (jobStatus) {
+                jobStatus.classList.remove('active');
+            }
             loading.classList.add('active');
             transcribeBtn.disabled = true;
 
@@ -1362,9 +1529,10 @@
 
         // Display job submission confirmation
         function displayJobStatus(jobData) {
-            const jobStatus = document.getElementById('jobStatus');
-            const jobId = document.getElementById('jobId');
-            const jobMessage = document.getElementById('jobMessage');
+            if (!jobStatus || !jobId || !jobMessage) {
+                console.error('Job status elements not found');
+                return;
+            }
             
             // Make sure job status is visible
             jobStatus.classList.add('active');
@@ -1476,7 +1644,9 @@
                     localStorage.removeItem('currentJobId');
                     localStorage.removeItem('jobSubmittedAt');
                     showError(data.error || 'Transcription failed');
-                    document.getElementById('jobStatus').classList.remove('active');
+                    if (jobStatus) {
+                        jobStatus.classList.remove('active');
+                    }
                 }
 
             } catch (err) {
@@ -1487,7 +1657,10 @@
 
         // Update job status message with intelligent context
         function updateJobStatusMessage(data) {
-            const jobMessage = document.getElementById('jobMessage');
+            if (!jobMessage) {
+                console.error('Job message element not found');
+                return;
+            }
 
             if (data.status === 'queued') {
                 jobMessage.innerHTML = `
@@ -1613,39 +1786,46 @@
             results.classList.add('active');
 
             // Transcript
-            document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
+            if (transcript) {
+                transcript.textContent = data.transcript || 'No transcript available';
+            }
 
             // Confidence
-            const confidenceEl = document.getElementById('confidence');
-            if (data.confidence !== null && data.confidence !== undefined) {
-                const confidence = Math.round(data.confidence * 100);
-                confidenceEl.textContent = `${confidence}% confident`;
+            if (confidence) {
+                if (data.confidence !== null && data.confidence !== undefined) {
+                    const confidenceValue = Math.round(data.confidence * 100);
+                    confidence.textContent = `${confidenceValue}% confident`;
 
-                if (confidence >= 90) {
-                    confidenceEl.className = 'confidence';
-                } else if (confidence >= 70) {
-                    confidenceEl.className = 'confidence medium';
+                    if (confidenceValue >= 90) {
+                        confidence.className = 'confidence';
+                    } else if (confidenceValue >= 70) {
+                        confidence.className = 'confidence medium';
+                    } else {
+                        confidence.className = 'confidence low';
+                    }
                 } else {
-                    confidenceEl.className = 'confidence low';
+                    // Confidence not available for this model (e.g., chirp)
+                    confidence.textContent = 'Confidence N/A';
+                    confidence.className = 'confidence na';
                 }
-            } else {
-                // Confidence not available for this model (e.g., chirp)
-                confidenceEl.textContent = 'Confidence N/A';
-                confidenceEl.className = 'confidence na';
             }
 
             // Stats
             // Count words from transcript
-            const wordCount = data.transcript ? data.transcript.split(/\s+/).filter(w => w.length > 0).length : 0;
-            document.getElementById('wordCount').textContent = wordCount;
+            const wordCountValue = data.transcript ? data.transcript.split(/\s+/).filter(w => w.length > 0).length : 0;
+            if (wordCount) {
+                wordCount.textContent = wordCountValue;
+            }
 
             // Duration - from file metadata we stored earlier
-            document.getElementById('duration').textContent =
-                `${Math.round(fileDurationMinutes)} min`;
+            if (duration) {
+                duration.textContent = `${Math.round(fileDurationMinutes)} min`;
+            }
 
             // Actual cost
-            document.getElementById('actualCost').textContent =
-                `$${(data.actual_cost || 0).toFixed(2)}`;
+            if (actualCost) {
+                actualCost.textContent = `$${(data.actual_cost || 0).toFixed(2)}`;
+            }
 
             // Re-enable transcribe button for new uploads
             transcribeBtn.disabled = false;

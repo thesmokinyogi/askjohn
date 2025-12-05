@@ -38,6 +38,9 @@ from app.models.transcript import TranscriptMetadata, transcript_metadata_to_dic
 
 logger = logging.getLogger(__name__)
 
+# Singleton instance
+_library_service = None
+
 
 class LibraryService:
     """
@@ -487,3 +490,19 @@ class LibraryService:
             pass  # Don't crash
         
         return results
+
+
+def get_library_service() -> LibraryService:
+    """
+    Get singleton LibraryService instance.
+    
+    LibraryService maintains in-memory state (loaded library entries),
+    so it should be a singleton to avoid reloading data multiple times.
+    
+    Returns:
+        LibraryService: Singleton instance
+    """
+    global _library_service
+    if _library_service is None:
+        _library_service = LibraryService()
+    return _library_service

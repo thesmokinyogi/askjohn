@@ -232,6 +232,80 @@ class AudioProcessingService:
         else:
             return 0.0, window_rms_values[0] if window_rms_values else 0.0
 
+    def extract_audio_from_video(self, file_path: str) -> str:
+        """
+        Extract audio from video file (MP4, MOV).
+        
+        Args:
+            file_path: Path to video file
+        
+        Returns:
+            Path to extracted audio file (MP3 format)
+        
+        Raises:
+            Exception: If audio extraction fails
+        """
+        file_extension = os.path.splitext(file_path)[1].lower()
+        logger.info(f"Video file detected ({file_extension}), extracting audio...")
+        
+        audio = AudioSegment.from_file(file_path, format=file_extension[1:])
+        mp3_path = file_path + ".mp3"
+        audio.export(mp3_path, format="mp3", bitrate="128k")
+        
+        logger.info(f"✓ Extracted audio from video: {mp3_path}")
+        return mp3_path
+
+    def convert_format(self, file_path: str, target_format: str = "mp3", bitrate: str = "128k") -> str:
+        """
+        Convert audio file to target format.
+        
+        Args:
+            file_path: Path to source audio file
+            target_format: Target format (default: "mp3")
+            bitrate: Bitrate for output (default: "128k")
+        
+        Returns:
+            Path to converted file
+        
+        Raises:
+            Exception: If conversion fails
+        """
+        source_ext = os.path.splitext(file_path)[1].lower().lstrip('.')
+        logger.info(f"Converting {source_ext} to {target_format}...")
+        
+        audio = AudioSegment.from_file(file_path, format=source_ext)
+        output_path = file_path + f".{target_format}"
+        audio.export(output_path, format=target_format, bitrate=bitrate)
+        
+        logger.info(f"✓ Converted to {target_format}: {output_path}")
+        return output_path
+
+    def _get_metadata_with_fallback(self, file_path: str) -> Dict:
+        """
+        Get metadata from file using AudioMetadataService, with fallback.
+        
+        Args:
+            file_path: Path to audio file
+        
+        Returns:
+            Metadata dictionary in AudioMetadataService format
+        """
+        try:
+            metadata_service = get_audio_metadata_service()
+            return metadata_service.analyze_file(file_path)
+        except Exception as e:
+            logger.warning(f"Could not extract metadata: {e}")
+            # Fallback metadata matching AudioMetadataService format
+            return {
+                'duration': 0.0,
+                'format': os.path.splitext(file_path)[1].lstrip('.') or 'unknown',
+                'codec': 'unknown',
+                'sample_rate': 16000,
+                'channels': 1,
+                'bit_rate': None,
+                'file_size': os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            }
+
     def prepare_for_upload(
         self,
         file_path: str,
@@ -241,10 +315,11 @@ class AudioProcessingService:
         """
         Prepare audio file for upload: extract channel if needed, convert formats.
         
-        This is the main entry point that handles the full pipeline:
-        1. Extract channel if specified (and file is stereo)
-        2. Convert formats (M4A→MP3, video→audio) if needed
-        3. Return processed file path and metadata
+        This orchestrates the full pipeline:
+        1. Extract audio from video files (MP4, MOV) if needed
+        2. Extract channel if specified (and file is stereo)
+        3. Convert formats (M4A→MP3) if needed
+        4. Extract and return metadata
         
         Args:
             file_path: Path to audio file
@@ -256,24 +331,19 @@ class AudioProcessingService:
         """
         file_extension = os.path.splitext(filename)[1].lower()
         processed_path = file_path
-        metadata = {}
         
         # Step 1: Extract audio from video files (MP4, MOV)
         if file_extension in ['.mp4', '.mov']:
-            logger.info(f"Video file detected ({file_extension}), extracting audio...")
             try:
-                audio = AudioSegment.from_file(file_path, format=file_extension[1:])
-                mp3_path = file_path + ".mp3"
-                audio.export(mp3_path, format="mp3", bitrate="128k")
-                processed_path = mp3_path
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
-                logger.info(f"✓ Extracted audio from video: {mp3_path}")
+                processed_path = self.extract_audio_from_video(file_path)
             except Exception as e:
                 logger.error(f"Failed to extract audio from video: {e}")
                 raise
         
         # Step 2: Extract channel if specified and file is stereo
         logger.info(f"Channel parameter received: {channel} (type: {type(channel).__name__})")
+        metadata = {}
+        
         if channel and channel.lower() not in ['none', '']:
             logger.info(f"Channel extraction requested: '{channel}' - proceeding with extraction...")
             try:
@@ -282,55 +352,21 @@ class AudioProcessingService:
             except ValueError as e:
                 # File is mono or invalid channel - log and continue with original
                 logger.warning(f"Channel extraction skipped: {e}")
-                # Load metadata for original file using AudioMetadataService
-                try:
-                    metadata_service = get_audio_metadata_service()
-                    metadata = metadata_service.analyze_file(processed_path)
-                except Exception as e2:
-                    logger.warning(f"Could not extract metadata: {e2}")
-                    # Fallback metadata matching AudioMetadataService format
-                    metadata = {
-                        'duration': 0.0,
-                        'format': os.path.splitext(processed_path)[1].lstrip('.') or 'unknown',
-                        'codec': 'unknown',
-                        'sample_rate': 16000,
-                        'channels': 1,
-                        'bit_rate': None,
-                        'file_size': os.path.getsize(processed_path) if os.path.exists(processed_path) else 0
-                    }
+                # Metadata will be extracted below if not already set
         
         # Step 3: Convert M4A to MP3 (if still M4A after channel extraction)
         upload_file_ext = os.path.splitext(processed_path)[1].lower()
         if file_extension == '.m4a' and upload_file_ext == '.m4a':
             logger.warning("⚠️  M4A file detected - converting to MP3 for compatibility")
             try:
-                audio = AudioSegment.from_file(processed_path, format="m4a")
-                mp3_path = processed_path + ".mp3"
-                audio.export(mp3_path, format="mp3", bitrate="128k")
-                processed_path = mp3_path
-                filename = filename.rsplit('.', 1)[0] + '.mp3'
-                logger.info(f"✓ Converted M4A to MP3: {mp3_path}")
+                processed_path = self.convert_format(processed_path, target_format="mp3")
             except Exception as e:
                 logger.error(f"Failed to convert M4A to MP3: {e}")
                 logger.warning("Attempting upload as M4A anyway...")
         
-        # If metadata not set yet (no channel extraction), extract it now using AudioMetadataService
+        # Step 4: Extract metadata if not already set (from channel extraction)
         if not metadata:
-            try:
-                metadata_service = get_audio_metadata_service()
-                metadata = metadata_service.analyze_file(processed_path)
-            except Exception as e:
-                logger.warning(f"Could not extract metadata: {e}")
-                # Fallback metadata matching AudioMetadataService format
-                metadata = {
-                    'duration': 0.0,
-                    'format': os.path.splitext(processed_path)[1].lstrip('.') or 'unknown',
-                    'codec': 'unknown',
-                    'sample_rate': 16000,
-                    'channels': 1,
-                    'bit_rate': None,
-                    'file_size': os.path.getsize(processed_path) if os.path.exists(processed_path) else 0
-                }
+            metadata = self._get_metadata_with_fallback(processed_path)
         
         return processed_path, metadata
 

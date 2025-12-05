@@ -95,12 +95,10 @@ class Config:
     # ============================================================================
     
     @property
-    def max_file_size_mb(self) -> int:
-        """Maximum file size in MB."""
-        if self.stt_provider == "google":
-            return 500
-        else:
-            return 10
+    def max_file_size_mb(self) -> Optional[int]:
+        """Maximum file size in MB. None means no limit (let API handle validation)."""
+        # No limit - we stream files and let Google's API reject if needed
+        return None
     
     @property
     def allowed_extensions(self) -> list[str]:

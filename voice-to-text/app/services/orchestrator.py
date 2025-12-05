@@ -67,7 +67,7 @@ class TranscriptionOrchestrator:
         default_model: str,
         project_id: str,
         speech_location: str,
-        max_file_size_mb: int = 500,
+        max_file_size_mb: Optional[int] = None,  # None means no limit
         test_mode: bool = False,
         test_gcs_uri: Optional[str] = None,
         test_audio_metadata: Optional[Dict[str, Any]] = None
@@ -116,11 +116,14 @@ class TranscriptionOrchestrator:
             )
         
         # Validate file size
-        max_size_bytes = self.max_file_size_mb * 1024 * 1024
-        if file_size > max_size_bytes:
-            raise ValueError(
-                f"File too large. Maximum size: {self.max_file_size_mb}MB"
-            )
+        # No file size validation - we stream files and let Google's API reject if needed
+        # If max_file_size_mb is None, skip validation (let API handle it)
+        if self.max_file_size_mb is not None:
+            max_size_bytes = self.max_file_size_mb * 1024 * 1024
+            if file_size > max_size_bytes:
+                raise ValueError(
+                    f"File too large. Maximum size: {self.max_file_size_mb}MB"
+                )
         
         return file_extension, None
     

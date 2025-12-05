@@ -20,8 +20,8 @@ router = APIRouter()
 
 def get_library_service() -> LibraryService:
     """Dependency: Get library service."""
-    # For now, create new instance - will be singleton in production
-    return LibraryService()
+    from app.services.library import get_library_service as _get_library_service
+    return _get_library_service()
 
 
 @router.get("/library", response_model=LibraryListResponse)

@@ -13,7 +13,7 @@ from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
 from app.services.cost_calculation import get_cost_calculation_service
 from app.services.jobs import get_job_storage
-from app.services.library import LibraryService
+from app.services.library import get_library_service
 from app.services.processing_time import get_processing_time_service
 from app.services.audio_metadata import get_audio_metadata_service
 from app.services.transcribe_v2 import get_transcription_service_v2
@@ -78,7 +78,7 @@ def get_orchestrator() -> TranscriptionOrchestrator:
         budget_service = get_budget_service(monthly_budget=config.monthly_budget)
         cost_calculation_service = get_cost_calculation_service()
         job_storage = get_job_storage()
-        library_service = LibraryService()
+        library_service = get_library_service()
         processing_time_service = get_processing_time_service()
         audio_metadata_service = get_audio_metadata_service()
         

@@ -246,11 +246,33 @@ async def detect_duration(
     filename = getattr(file, 'filename', None) if file else None
     
     try:
-        # Read file bytes
-        audio_bytes = await file.read()
+        # Stream file to temp file instead of loading into memory
+        # Metadata extraction only needs the file header, but we need to write
+        # the file to disk for mutagen/ffprobe to analyze it efficiently
+        import tempfile
+        from pathlib import Path
         
-        # Extract metadata
-        metadata = metadata_service.analyze_bytes(audio_bytes, filename)
+        file_extension = Path(filename).suffix if filename else '.tmp'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
+            temp_path = tmp_file.name
+            # Stream file in chunks to avoid loading entire file into memory
+            chunk_size = 8192  # 8KB chunks
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                tmp_file.write(chunk)
+        
+        try:
+            # Analyze from file path (more efficient - mutagen/ffprobe can read header only)
+            metadata = metadata_service.analyze_file(Path(temp_path))
+            
+            # Update file size from temp file
+            metadata['file_size'] = os.path.getsize(temp_path)
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
         
         # Add duration in minutes for convenience
         metadata["duration_minutes"] = metadata["duration"] / 60.0

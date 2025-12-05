@@ -44,10 +44,13 @@ class AudioMetadataService:
 
     def analyze_file(self, file_path: Union[str, Path]) -> Dict[str, Any]:
         """
-        Extract metadata from an audio file path.
+        Extract metadata from an audio/video file path.
+        
+        For video files (MOV, MP4), attempts to use ffprobe for efficient header-only reading.
+        For audio files, uses mutagen which can read metadata from headers efficiently.
 
         Args:
-            file_path: Path to audio file
+            file_path: Path to audio/video file
 
         Returns:
             Dictionary with metadata:
@@ -67,7 +70,17 @@ class AudioMetadataService:
             if not file_path.exists():
                 raise FileNotFoundError(f"Audio file not found: {file_path}")
 
-            # Use mutagen to load audio file
+            # For video files, try ffprobe first (more efficient, reads headers only)
+            file_ext = file_path.suffix.lower()
+            if file_ext in ['.mov', '.mp4', '.m4v']:
+                try:
+                    return self._analyze_video_with_ffprobe(file_path)
+                except Exception as e:
+                    logger.warning(f"ffprobe failed for {file_path.name}, falling back to mutagen: {e}")
+                    # Fall through to mutagen
+
+            # Use mutagen for audio files (or as fallback for video)
+            # Mutagen is smart enough to read only what it needs from file headers
             audio = MutagenFile(file_path)
 
             if audio is None:
@@ -83,6 +96,60 @@ class AudioMetadataService:
         except Exception as e:
             logger.error(f"Error analyzing audio file {file_path}: {e}")
             raise
+    
+    def _analyze_video_with_ffprobe(self, file_path: Path) -> Dict[str, Any]:
+        """
+        Extract metadata from video file using ffprobe (reads headers only, very efficient).
+        
+        Args:
+            file_path: Path to video file
+            
+        Returns:
+            Metadata dictionary
+        """
+        import subprocess
+        import json
+        
+        # Use ffprobe to extract metadata (reads headers only, doesn't load entire file)
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            '-show_streams',
+            str(file_path)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffprobe failed: {result.stderr}")
+        
+        probe_data = json.loads(result.stdout)
+        
+        # Extract duration from format or streams
+        duration = float(probe_data.get('format', {}).get('duration', 0))
+        
+        # Find audio stream
+        audio_stream = None
+        for stream in probe_data.get('streams', []):
+            if stream.get('codec_type') == 'audio':
+                audio_stream = stream
+                break
+        
+        # Extract metadata
+        metadata = {
+            'duration': duration,
+            'duration_minutes': duration / 60.0,
+            'format': file_path.suffix.lstrip('.').lower(),
+            'codec': audio_stream.get('codec_name', 'unknown') if audio_stream else 'unknown',
+            'sample_rate': int(audio_stream.get('sample_rate', 0)) if audio_stream else 0,
+            'channels': int(audio_stream.get('channels', 0)) if audio_stream else 0,
+            'bit_rate': int(probe_data.get('format', {}).get('bit_rate', 0)),
+            'file_size': file_path.stat().st_size
+        }
+        
+        logger.info(f"Extracted metadata via ffprobe from {file_path.name}: {metadata['duration']:.1f}s")
+        return metadata
 
     def analyze_bytes(self, audio_bytes: bytes, filename: str) -> Dict[str, Any]:
         """

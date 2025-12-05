@@ -28,12 +28,13 @@ from app.services.transcribe_v2 import (
     get_available_models
 )
 from app.services.storage import CloudStorageService
+from app.dependencies import get_storage_service
 from app.services.pricing import get_pricing_service
 from app.services.budget import get_budget_service
 from app.services.processing_time import get_processing_time_service
 from app.services.jobs import get_job_storage
 from app.services.audio_metadata import get_audio_metadata_service
-from app.services.library import LibraryService
+from app.services.library import get_library_service
 
 # Import new API structure
 from app.api.v1 import api_router
@@ -116,7 +117,7 @@ GOOGLE_CLOUD_PROJECT = config.google_cloud_project
 pricing_service = get_pricing_service()
 budget_service = get_budget_service(monthly_budget=MONTHLY_BUDGET)
 job_storage = get_job_storage()
-library_service = LibraryService()
+library_service = get_library_service()
 processing_time_service = get_processing_time_service()
 
 # Initialize services based on provider
@@ -127,11 +128,8 @@ if STT_PROVIDER == "google":
     if not GOOGLE_CLOUD_PROJECT:
         raise ValueError("GOOGLE_CLOUD_PROJECT must be set in .env when using Google provider")
 
-    # Initialize storage service first
-    storage_service = CloudStorageService(
-        bucket_name=GCS_BUCKET_NAME,
-        project_id=GOOGLE_CLOUD_PROJECT
-    )
+    # Initialize storage service first (use singleton from dependencies)
+    storage_service = get_storage_service()
 
     # Detect optimal Speech V2 location based on bucket location
     # This aligns API region with storage region for optimal latency
@@ -477,6 +475,9 @@ async def transcribe_audio(
             "estimated_cost": 1.20
         }
     """
+    # Initialize variables that may be referenced in exception handler
+    gcs_uri = None
+    temp_path = None
 
     # ===== STEP 1: Validate and prepare file =====
 
@@ -524,7 +525,6 @@ async def transcribe_audio(
         )
 
     # Stream file to temp file instead of loading into memory (for large files)
-    temp_path = None
     try:
         # Get file extension for temp file
         file_extension = Path(file.filename).suffix if file.filename else '.tmp'
@@ -543,19 +543,16 @@ async def transcribe_audio(
                 temp_file.write(chunk)
                 total_size += len(chunk)
         
-        # Validate file size (get from disk)
-        max_size_mb = 500 if STT_PROVIDER == "google" else 10
-        if total_size > max_size_mb * 1024 * 1024:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File too large. Maximum size: {max_size_mb}MB"
-            )
+        # No file size limit - Google's batch API limit is duration (8 hours), not file size
+        # We validate duration after audio extraction (in upload_audio_from_file)
+        # Reference: https://cloud.google.com/speech-to-text/docs/quotas
+        # Batch requests: up to 8 hours per file, stored in Cloud Storage
+        logger.info(f"File size: {total_size / (1024*1024):.1f} MB (validating duration after audio extraction)")
 
         logger.info(f"Processing file: {file.filename} ({total_size} bytes, streamed to {temp_path})")
 
         # ===== STEP 2: Upload to Cloud Storage (streaming from disk) =====
 
-        gcs_uri = None
         # TEST MODE: Skip upload for faster testing
         if TEST_MODE_SKIP_UPLOAD:
             logger.warning("⚠️  TEST MODE: Skipping upload, using cached file")
@@ -608,13 +605,16 @@ async def transcribe_audio(
         # Extract the job ID from the operation
         # This is Google's unique identifier for this operation
         # We'll use it later to check status and get results
-        job_id = operation.operation.name
+        google_operation_id = operation.operation.name
+        job_id = google_operation_id  # Use Google operation ID as job_id (consistent with normal flow)
         logger.info(f"Job submitted successfully: {job_id}")
 
         # ===== STEP 5: Store job record =====
 
         # Create job record in our storage
         # This lets us track and list jobs later
+        # NOTE: For direct submissions (main endpoint), we have google_operation_id immediately
+        # For queued jobs (API v1 endpoint), google_operation_id is set later when processed
         job_record = job_storage.create_job(
             job_id=job_id,
             filename=file.filename,
@@ -625,6 +625,13 @@ async def transcribe_audio(
             gcs_uri=gcs_uri,  # Store for GCS result lookup
             channel=channel  # Store channel selection for stereo files
         )
+        
+        # Set google_operation_id explicitly (same as job_id for direct submissions)
+        # This ensures consistency and enables fallback lookups
+        # For queued jobs, this is set later when the queue processor submits to Google
+        job_storage.update_job(job_id, {
+            "google_operation_id": google_operation_id
+        })
 
         # ===== STEP 6: Return immediately =====
 
@@ -642,7 +649,10 @@ async def transcribe_audio(
         })
 
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         logger.error(f"Error submitting transcription job: {e}")
+        logger.error(f"Traceback: {error_details}")
 
         # Clean up uploaded file on error
         if gcs_uri and not TEST_MODE_SKIP_UPLOAD:
@@ -651,9 +661,11 @@ async def transcribe_audio(
             except:
                 pass  # Best effort cleanup
 
+        # Provide more detailed error message
+        error_msg = str(e) if str(e) else f"{type(e).__name__}: {repr(e)}"
         raise HTTPException(
             status_code=500,
-            detail=f"Error submitting transcription: {str(e)}"
+            detail=f"Error submitting transcription: {error_msg}"
         )
     finally:
         # Clean up temp file
@@ -696,6 +708,18 @@ async def check_job_status(job_id: str):
         # For in-progress jobs, don't load transcript (it doesn't exist yet)
         job_record = job_storage.get_job(job_id, include_transcript=False)
 
+        # Fallback: If not found by job_id, try finding by google_operation_id
+        # This handles cases where job was created with temporary ID and later updated
+        if not job_record:
+            logger.info(f"Job {job_id} not found by job_id, searching by google_operation_id...")
+            all_jobs = job_storage.list_jobs()
+            for job in all_jobs.values():
+                if job.get("google_operation_id") == job_id:
+                    job_record = job
+                    job_id = job["job_id"]  # Use internal job_id for consistency
+                    logger.info(f"Found job by google_operation_id: {job_id}")
+                    break
+        
         if not job_record:
             # Job ID not found in our records
             raise HTTPException(
@@ -1118,7 +1142,7 @@ async def get_config():
     """
     config = {
         "provider": STT_PROVIDER,
-        "max_file_size_mb": 500 if STT_PROVIDER == "google" else 10,
+        "max_file_size_mb": None,  # No limit - let Google's API handle validation
         "supported_formats": ["mp3", "wav", "m4a", "ogg", "flac", "mp4", "mov"]
     }
 
@@ -1216,14 +1240,90 @@ async def detect_duration(file: UploadFile = File(...)):
     filename = getattr(file, 'filename', None) if file else None
     
     try:
-        # Read file bytes
-        audio_bytes = await file.read()
-
-        # Get metadata service
-        metadata_service = get_audio_metadata_service()
-
-        # Extract metadata
-        metadata = metadata_service.analyze_bytes(audio_bytes, filename)
+        # Efficient metadata extraction: only read necessary parts of file
+        # Video files: first 64KB (headers only)
+        # MP3 files: first 64KB (ID3v2) + last 128 bytes (ID3v1)
+        # Other audio: first 64KB (headers at beginning)
+        import tempfile
+        from pathlib import Path
+        
+        file_extension = Path(filename).suffix.lower() if filename else '.tmp'
+        is_video = file_extension in ['.mov', '.mp4', '.m4v']
+        is_mp3 = file_extension == '.mp3'
+        
+        # Read only necessary chunks for metadata extraction
+        header_chunk_size = 64 * 1024  # 64KB for headers/ID3v2
+        id3v1_size = 128  # Last 128 bytes for ID3v1 tags
+        
+        # Read first chunk (headers/ID3v2)
+        first_chunk = await file.read(header_chunk_size)
+        
+        # For MP3, we also need the last 128 bytes (ID3v1)
+        # But we can't seek on UploadFile, so we need to track file size
+        # Strategy: Read until end, keeping track of last 128 bytes
+        mp3_tail = None
+        if is_mp3:
+            # Continue reading to get file size and last 128 bytes
+            chunk_size = 8192
+            total_size = len(first_chunk)
+            last_chunks = []
+            
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                last_chunks.append(chunk)
+                # Keep only last 128 bytes worth of chunks
+                if len(last_chunks) > 1:
+                    last_chunks.pop(0)
+            
+            # Combine last chunks and take last 128 bytes
+            if last_chunks:
+                combined_tail = b''.join(last_chunks)
+                mp3_tail = combined_tail[-id3v1_size:] if len(combined_tail) >= id3v1_size else combined_tail
+        else:
+            # For non-MP3, continue reading to get file size
+            chunk_size = 8192
+            total_size = len(first_chunk)
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+        
+        # Reset file pointer for actual upload (if needed)
+        # Note: UploadFile doesn't support seek(), so we'd need to re-upload
+        # But since this is just for duration detection, we'll handle that in the main endpoint
+        
+        # Create minimal temp file with just necessary data
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
+            temp_path = tmp_file.name
+            tmp_file.write(first_chunk)
+            if mp3_tail:
+                tmp_file.write(mp3_tail)
+        
+        try:
+            # Get metadata service
+            metadata_service = get_audio_metadata_service()
+            
+            # Analyze from minimal file (headers only)
+            metadata = metadata_service.analyze_file(Path(temp_path))
+            
+            # Update file size from actual file size we tracked
+            metadata['file_size'] = total_size
+        except Exception as e:
+            # If partial file doesn't work, fall back to full file
+            # This shouldn't happen often, but provides safety
+            logger.warning(f"Partial file metadata extraction failed for {filename}, falling back to full file: {e}")
+            # Note: We can't re-read the file here since UploadFile doesn't support seek
+            # This is a fallback that would require re-uploading the file
+            # For now, we'll raise the error and let the caller handle it
+            raise
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
         # Add duration in minutes for convenience
         metadata["duration_minutes"] = metadata["duration"] / 60.0
