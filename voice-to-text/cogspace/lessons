@@ -1,0 +1,10 @@
+#!/bin/bash
+# COGSPACE v40.0.0
+# Lessons management quick command
+case "$1" in
+    "list") node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>console.log(await new s().manageLessons('list')))()" ;;
+    "add") node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>await new s().manageLessons('add','$2','$3'))()" ;;
+    "get") node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>console.log(await new s().manageLessons('get','$2')))()" ;;
+    *) echo "Usage: lessons [list|add|get] [name] [content]" ;;
+esac
+

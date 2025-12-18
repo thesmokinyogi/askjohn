@@ -1,0 +1,163 @@
+#!/bin/bash
+# COGSPACE v55.0.0 - Progress Reporting
+# Create progress reports for project tracking
+# v55.0.0: Fixed symlink resolution for PROJECT_ROOT calculation
+
+# Resolve symlink before calculating PROJECT_ROOT
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ -L "$SCRIPT_PATH" ]]; then
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+fi
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+
+# Read version dynamically - NEVER hardcode!
+VERSION=$(jq -r '.version // "unknown"' "$PROJECT_ROOT/cogspace/cogspace-version.json" 2>/dev/null || echo "unknown")
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Portable path detection: Crystal Palace or local
+# Crystal Palace mode: use centralized reporting system
+# Portable mode: save to local cogspace/output/progress-reports/
+if [[ -d "/Volumes/FOUR-TB/crystal-palace/progress-reporting" ]]; then
+    PROGRESS_SYSTEM="/Volumes/FOUR-TB/crystal-palace/progress-reporting/incoming"
+    MODE="Crystal Palace"
+else
+    # Portable mode - save locally in cogspace/output/
+    PROGRESS_SYSTEM="$PROJECT_ROOT/cogspace/output/progress-reports"
+    MODE="Portable"
+fi
+mkdir -p "$PROGRESS_SYSTEM" 2>/dev/null
+
+show_help() {
+    echo "COGSPACE v$VERSION - Progress Reporting"
+    echo ""
+    echo "Usage: progress-report [command]"
+    echo ""
+    echo "Commands:"
+    echo "  create              Create a new progress report (default)"
+    echo "  list                List existing progress reports"
+    echo "  help                Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  progress-report"
+    echo "  progress-report create"
+    echo "  progress-report list"
+    echo ""
+    echo "Mode: $MODE"
+    echo "Output: $PROGRESS_SYSTEM"
+}
+
+list_reports() {
+    echo -e "${BLUE}📊 Progress Reports for $PROJECT_NAME${NC}"
+    echo -e "${CYAN}Mode: $MODE${NC}"
+    echo ""
+    if [[ -d "$PROGRESS_SYSTEM" ]]; then
+        count=$(ls "$PROGRESS_SYSTEM/"*.md 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$count" -gt 0 ]]; then
+            ls -la "$PROGRESS_SYSTEM/"*.md 2>/dev/null
+        else
+            echo "  (no reports found)"
+        fi
+    else
+        echo "  (reports directory not found)"
+    fi
+}
+
+create_report() {
+    CURRENT_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    REPORT_ID="${PROJECT_NAME}-progress-$(date +'%Y%m%d-%H%M%S')-$(printf "%04d" $((RANDOM % 10000)))"
+    PROGRESS_REPORT="$PROGRESS_SYSTEM/progress-report-${REPORT_ID}.md"
+
+    echo -e "${BLUE}📊 COGSPACE Progress Reporting${NC}"
+    echo -e "${CYAN}Project: $PROJECT_NAME | Mode: $MODE${NC}"
+    echo ""
+
+    cat > "$PROGRESS_REPORT" << TEMPLATE
+# Progress Report
+
+**Report ID:** ${REPORT_ID}
+**Date Submitted:** ${CURRENT_TIME}
+**Project:** ${PROJECT_NAME}
+**Folder:** ${PROJECT_ROOT}
+**Reporter:** $(whoami)
+**Status:** [ON TRACK/AT RISK/BEHIND SCHEDULE/COMPLETED]
+
+## 📊 **Progress Summary**
+
+### **Current Status**
+[Brief overview of current progress - what's been accomplished]
+
+### **Milestones**
+- [ ] [Milestone 1 - status and completion %]
+- [ ] [Milestone 2 - status and completion %]
+- [ ] [Milestone 3 - status and completion %]
+
+### **Achievements**
+- [Achievement 1 - what was completed]
+- [Achievement 2 - what was completed]
+- [Achievement 3 - what was completed]
+
+## 🚧 **Challenges & Blockers**
+
+### **Current Blockers**
+- [Blocker 1 - what's preventing progress]
+- [Blocker 2 - what's preventing progress]
+
+### **Risks**
+- [Risk 1 - potential issues that might arise]
+- [Risk 2 - potential issues that might arise]
+
+## 🎯 **Next Steps**
+
+### **Immediate Actions (Next 24-48 hours)**
+1. [Action 1 - specific next step]
+2. [Action 2 - specific next step]
+3. [Action 3 - specific next step]
+
+### **Short-term Goals (Next week)**
+1. [Goal 1 - what you plan to accomplish]
+2. [Goal 2 - what you plan to accomplish]
+
+## 📈 **Metrics**
+
+- **Overall Progress:** [X]% complete
+- **Test Coverage:** [X]%
+- **Quality Score:** [X]/10
+
+---
+
+**Tags:** [progress, milestone, update]
+TEMPLATE
+
+    echo -e "${GREEN}✅ Progress report created:${NC}"
+    echo -e "${YELLOW}$PROGRESS_REPORT${NC}"
+    echo ""
+    echo -e "${BLUE}📝 Next Steps:${NC}"
+    echo "1. Edit the report with your progress details"
+    echo "2. Save the file"
+}
+
+case "$1" in
+    "help"|"--help"|"-h")
+        show_help
+        ;;
+    "list")
+        list_reports
+        ;;
+    "create"|"")
+        create_report
+        ;;
+    *)
+        show_help
+        ;;
+esac

@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COGSPACE Dashboard - voice-to-text</title>
+    <style>
+        :root {
+            --glass-bg: rgba(0, 20, 40, 0.85);
+            --glass-border: rgba(100, 180, 255, 0.3);
+            --accent-blue: #0056b3;
+            --bright-blue: #0d6efd;
+            --text-label: #8cb4ff;
+            --text-white: #ffffff;
+            --text-yellow: #ffc107;
+            --frame-border: #004085;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: #0b1118;
+            color: var(--text-white);
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* --- Main Dashboard Container --- */
+        .dashboard-container {
+            width: 60%;
+            height: 100vh;
+            border: 2px solid var(--frame-border);
+            border-radius: 0;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0, 86, 179, 0.4);
+            background: #001f3f;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Header Area (Lab image as background) --- */
+        .header-area {
+            background: linear-gradient(135deg, #0a1628 0%, #1a2d4a 100%);
+            padding: 8px 15px;
+            border-bottom: 2px solid #2a4a7a;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Lab image as full background on right */
+        .header-bg-image {
+            position: absolute;
+            right: 0;
+            top: 0;
+            height: 100%;
+            width: 70%;
+            object-fit: cover;
+            object-position: center;
+            opacity: 0.8;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* --- Header Right Side (Title + Session Info) --- */
+        .header-right {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            position: relative;
+            z-index: 1;
+            flex: 1;
+        }
+
+        /* --- Header Title --- */
+        .header-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-white);
+            margin: 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        .header-title span {
+            color: var(--text-yellow);
+        }
+
+        /* --- Header Content (Session info only now) --- */
+        .header-content {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* --- Clock Widget (Left panel - vertical stack) --- */
+        .clock-widget {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 8px;
+            background: rgba(10, 22, 40, 0.9);
+            border: 1px solid #2a4a7a;
+            border-radius: 4px;
+            box-sizing: border-box;
+            min-width: 75px;
+        }
+
+        .clock-header {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-white);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+
+        .clock-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .clock-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1px;
+        }
+
+        .clock-face {
+            width: 52px;
+            height: 52px;
+            background: white;
+            border-radius: 50%;
+            position: relative;
+            border: 2px solid #4a6a9a;
+            box-shadow: inset 0 0 4px rgba(0,0,0,0.15);
+        }
+
+        .clock-num {
+            position: absolute;
+            font-size: 9px;
+            color: var(--accent-blue);
+            font-weight: bold;
+        }
+        .n12 { top: 3px; left: 50%; transform: translateX(-50%); }
+        .n3 { right: 4px; top: 50%; transform: translateY(-50%); }
+        .n6 { bottom: 3px; left: 50%; transform: translateX(-50%); }
+        .n9 { left: 4px; top: 50%; transform: translateY(-50%); }
+
+        .hand {
+            position: absolute;
+            bottom: 50%;
+            left: 50%;
+            transform-origin: bottom center;
+            background: #333;
+            border-radius: 2px;
+        }
+        .hand.hour { height: 15px; width: 3px; margin-left: -1.5px; }
+        .hand.min { height: 20px; width: 2px; margin-left: -1px; background: var(--accent-blue); }
+
+        .clock-face::after {
+            content: '';
+            position: absolute;
+            width: 5px;
+            height: 5px;
+            background: #333;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .clock-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-white);
+        }
+        .clock-label span { color: var(--text-yellow); font-size: 9px; }
+
+        /* --- Session Info Panel (Right - single column label:value, auto-height) --- */
+        .session-info-panel {
+            background: rgba(10, 22, 40, 0.85);
+            border: 1px solid #2a4a7a;
+            padding: 10px 15px;
+            border-radius: 4px;
+            display: grid;
+            grid-template-columns: auto auto;
+            column-gap: 12px;
+            row-gap: 2px;
+            font-size: 12px;
+            align-content: start;
+            align-self: start;
+        }
+
+        .session-info-panel .label {
+            color: #f0c674;
+            font-weight: 500;
+            text-align: right;
+        }
+
+        .session-info-panel .value {
+            color: var(--text-white);
+        }
+
+        /* Legacy panels (hidden) */
+        .dev-info-panel, .session-panel, .session-image, .session-details {
+            display: none;
+        }
+
+        /* --- Legacy info-panel (hidden) --- */
+        .info-panel {
+            display: none;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            column-gap: 12px;
+            row-gap: 6px;
+            font-size: 12px;
+            width: 100%;
+        }
+
+        .label {
+            color: var(--text-label);
+            text-align: right;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .value {
+            color: var(--text-white);
+            font-weight: 400;
+        }
+
+        /* --- Tab Bar --- */
+        .tab-bar {
+            background: #002a5c;
+            display: flex;
+            padding: 8px 15px;
+            gap: 6px;
+            border-top: 1px solid var(--frame-border);
+            justify-content: space-between;
+        }
+
+        .tab-group {
+            display: flex;
+            gap: 6px;
+        }
+
+        .tab-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #aabbd0;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .tab-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+        }
+
+        .tab-btn.active {
+            background: var(--bright-blue);
+            color: white;
+            border-color: var(--bright-blue);
+            box-shadow: 0 0 10px rgba(13, 110, 253, 0.5);
+        }
+
+        /* --- Content Container --- */
+        .container {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            background: #001d3d;
+        }
+
+        .dashboard-container > .visual-area,
+        .dashboard-container > .tab-bar {
+            flex-shrink: 0;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 20px 30px;
+            border-radius: 0;
+            border: none;
+            min-height: 100%;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .message {
+            background: #002855;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #0466c8;
+        }
+
+        .message.user {
+            border-left-color: #4ade80;
+        }
+
+        .message-role {
+            font-weight: bold;
+            color: #64b5f6;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .message.user .message-role {
+            color: #4ade80;
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        .message-time {
+            font-size: 0.85rem;
+            opacity: 0.7;
+            margin-bottom: 8px;
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #002855;
+            border-radius: 8px;
+            border-left: 3px solid #0466c8;
+        }
+
+        .timeline-time {
+            min-width: 180px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .timeline-event {
+            font-weight: bold;
+            color: #64b5f6;
+            margin-bottom: 5px;
+        }
+
+        .source-item {
+            background: #002855;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .source-file {
+            font-family: 'Monaco', 'Courier New', monospace;
+            color: #4ade80;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .source-lines {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .source-type {
+            display: inline-block;
+            background: #0466c8;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .chart {
+            background: #002855;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .chart-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #64b5f6;
+        }
+
+        .chart-bar {
+            margin-bottom: 10px;
+        }
+
+        .chart-label {
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .chart-bar-fill {
+            height: 25px;
+            background: linear-gradient(90deg, #0466c8 0%, #0353a4 100%);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .story-section {
+            margin-bottom: 25px;
+        }
+
+        .story-title {
+            font-weight: bold;
+            color: #64b5f6;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .story-content {
+            background: #002855;
+            padding: 15px;
+            border-radius: 8px;
+            line-height: 1.8;
+            border-left: 3px solid #0466c8;
+        }
+
+        .decision-item, .lesson-item {
+            background: #002855;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 3px solid #0466c8;
+        }
+
+        .welcome-banner {
+            background: linear-gradient(135deg, #0466c8 0%, #0353a4 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: center;
+            box-shadow: 0 8px 16px rgba(4, 102, 200, 0.3);
+            border: 1px solid #0466c8;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            opacity: 0.6;
+            color: #7c98b3;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        /* Clock Styles */
+        .timezone-header {
+            display: flex;
+            gap: 15px;
+        }
+
+        .analog-clock {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .clock-face {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            border: 3px solid #667eea;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .clock-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+
+        .hour-marker {
+            position: absolute;
+            font-size: 0.65em;
+            font-weight: 600;
+            color: #667eea;
+            transform: translate(-50%, -50%);
+        }
+
+        .hour-12 { top: 8%; left: 50%; }
+        .hour-3 { top: 50%; right: 8%; left: auto; transform: translate(0%, -50%); }
+        .hour-6 { bottom: 8%; top: auto; left: 50%; transform: translate(-50%, 0%); }
+        .hour-9 { top: 50%; left: 8%; transform: translate(0%, -50%); }
+
+        .clock-hand {
+            position: absolute;
+            bottom: 50%;
+            left: 50%;
+            transform-origin: bottom center;
+            background: #2d3748;
+            border-radius: 2px;
+        }
+
+        .hour-hand {
+            width: 3px;
+            height: 25px;
+            margin-left: -1.5px;
+        }
+
+        .minute-hand {
+            width: 2px;
+            height: 32px;
+            margin-left: -1px;
+            background: #4a5568;
+        }
+
+        .clock-label {
+            font-size: 0.75em;
+            color: #718096;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .clock-ampm {
+            font-size: 0.7em;
+            color: #a0aec0;
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="header-area">
+            <!-- Lab image as background -->
+            <img src="../../cogspace/dashboard/img/crystal-palace-lab.png" alt="Crystal Palace Lab" class="header-bg-image" onerror="this.style.display='none'">
+
+            <!-- Clocks (Left column - vertical stack) -->
+            <div class="clock-widget">
+                <div class="clock-header">Team Time</div>
+                <div class="clock-row">
+                    <div class="clock-item">
+                        <div class="clock-face" id="clock-pacific">
+                            <div class="clock-num n12">12</div>
+                            <div class="clock-num n3">3</div>
+                            <div class="clock-num n6">6</div>
+                            <div class="clock-num n9">9</div>
+                            <div class="hand hour" id="hour-hand-pacific"></div>
+                            <div class="hand min" id="minute-hand-pacific"></div>
+                        </div>
+                        <div class="clock-label">Pacific <span id="ampm-pacific">AM</span></div>
+                    </div>
+                    <div class="clock-item">
+                        <div class="clock-face" id="clock-paraguay">
+                            <div class="clock-num n12">12</div>
+                            <div class="clock-num n3">3</div>
+                            <div class="clock-num n6">6</div>
+                            <div class="clock-num n9">9</div>
+                            <div class="hand hour" id="hour-hand-paraguay"></div>
+                            <div class="hand min" id="minute-hand-paraguay"></div>
+                        </div>
+                        <div class="clock-label">Paraguay <span id="ampm-paraguay">PM</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right side: Title + Session Info -->
+            <div class="header-right">
+                <div class="header-title">Ideaplace™ Project Name: <span>voice-to-text</span></div>
+
+                <div class="header-content">
+                    <!-- Session Info Panel -->
+                    <div class="session-info-panel">
+                        <span class="label">Lead Developer:</span>
+                        <span class="value">John carosella gardner</span>
+                        <span class="label">AI Developer:</span>
+                        <span class="value">Bob</span>
+                        <span class="label">COGSPACE™:</span>
+                        <span class="value">v59.3.0</span>
+                        <span class="label">Timestamp:</span>
+                        <span class="value">12/15/2025, 1:17:04 PM</span>
+                        <span class="label">Session ID:</span>
+                        <span class="value">welcome-1765833424</span>
+                        <span class="label">Duration:</span>
+                        <span class="value">N/A</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Section Title with Session Date -->
+        <div style="margin: 15px 0 8px 0; padding: 0 15px;">
+            <h2 style="margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.5px;">
+                <span style="color: #ffffff;">Prior Work Session Context &amp; Details - </span><span style="color: #f0c674;">Monday, December 15, 2025</span>
+            </h2>
+        </div>
+
+        <div class="tab-bar">
+            <div class="tab-group">
+                <button class="tab-btn active" onclick="switchTab(this, 'whatsnext')">What's Next?</button>
+                <button class="tab-btn" onclick="switchTab(this, 'whatwedid')">What We Did</button>
+                <button class="tab-btn" onclick="switchTab(this, 'conversation')">Conversation (3)</button>
+            </div>
+            <div class="tab-group">
+                <button class="tab-btn" onclick="switchTab(this, 'environment')">Environment</button>
+                <button class="tab-btn" onclick="switchTab(this, 'history')">History</button>
+                <button class="tab-btn" onclick="switchTab(this, 'participants')">Participants</button>
+                <button class="tab-btn" onclick="switchTab(this, 'readme')">README</button>
+                <button class="tab-btn" onclick="switchTab(this, 'guide')">Help</button>
+            </div>
+        </div>
+
+        <div class="container">
+
+        <!-- What's Next Tab (v58.0.0: Enhanced with executable-continuity) -->
+        <div id="whatsnext" class="tab-content active">
+            <h2 style="margin-bottom: 20px;">What's Next?</h2>
+
+            <!-- v58.0.0: Immediate Next Actions from executable-continuity -->
+            
+
+            <!-- v58.0.0: Next Session Focus from executable-continuity -->
+            
+
+            <!-- v58.0.0: Commands to Run from executable-continuity -->
+            
+
+            
+
+            
+
+            
+
+            
+
+            
+            <div class="empty-state">
+                <div class="empty-state-icon">🚀</div>
+                <div>Ready to start a new session!</div>
+                <div style="margin-top: 10px; font-size: 0.9rem; opacity: 0.7;">
+                    Immediate actions and next steps will appear here after running <strong>./bye "session summary"</strong>
+                </div>
+            </div>
+            
+        </div>
+
+        <!-- What We Did Tab (v52.0.0: Consolidated from Overview + Story) -->
+        <div id="whatwedid" class="tab-content">
+            <h2 style="margin-bottom: 20px;">📖 What We Did</h2>
+
+            
+
+            <!-- 1. Semantic Summary (What/Why/How) -->
+            
+
+            <!-- 2. Session Narrative (chronological flow) -->
+            
+
+            
+            <div class="story-section">
+                <div class="story-title">📝 Work Narrative</div>
+                <div class="story-content">This is your first COGSPACE session! As you work together with Claude Code, we&#039;ll build a shared understanding of your project.</div>
+            </div>
+            
+
+            <!-- 3. Key Decisions -->
+            
+
+            <!-- 4. Achievements (v58.0.0: Added missing achievements section) -->
+            
+            <div class="story-section">
+                <div class="story-title">🏆 Achievements</div>
+                
+                    <div class="decision-item" style="padding: 10px 12px; background: #1a1f3a; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #4ade80;">
+                        ✅ COGSPACE initialized successfully
+                    </div>
+                
+                    <div class="decision-item" style="padding: 10px 12px; background: #1a1f3a; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #4ade80;">
+                        ✅ Cognitive context system ready
+                    </div>
+                
+                    <div class="decision-item" style="padding: 10px 12px; background: #1a1f3a; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #4ade80;">
+                        ✅ Session management active
+                    </div>
+                
+            </div>
+            
+
+            <!-- 5. Challenges (v58.0.0: Renamed from "Lessons Learned" - semantically accurate) -->
+            
+
+            <!-- 6. Progress Arc / Goal Hierarchy -->
+            
+            <div class="story-section">
+                <div class="story-title">🎯 Progress Arc</div>
+                <div class="story-content">
+                    
+                    
+                    
+                    <div style="margin-bottom: 15px; padding: 12px; background: #1a1f3a; border-radius: 6px; border-left: 3px solid #64b5f6;">
+                        <strong style="color: #64b5f6;">Current Chapter:</strong> Welcome & Initialization
+                    </div>
+                    
+                    
+                    <div style="padding: 12px; background: #1a1f3a; border-radius: 6px; border-left: 3px solid #a78bfa;">
+                        <strong style="color: #a78bfa;">Progress:</strong> Beginning → Active Development → Continuous Improvement
+                    </div>
+                    
+                    
+                </div>
+            </div>
+            
+
+            
+        </div>
+
+        <!-- Conversation Tab -->
+        <div id="conversation" class="tab-content">
+            <h2 style="margin-bottom: 20px;">Conversation</h2>
+
+            <!-- Search and Filter Controls -->
+            <div style="margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+                <!-- Search Input -->
+                <div style="flex: 1; min-width: 200px; position: relative;">
+                    <input type="text" id="message-search" placeholder="🔍 Search conversation..." oninput="searchMessages(this.value)" style="width: 100%; padding: 10px 15px 10px 15px; border-radius: 8px; border: 1px solid rgba(102, 126, 234, 0.4); background: rgba(0, 20, 40, 0.6); color: #fff; font-size: 0.95rem; outline: none; transition: border-color 0.2s;">
+                    <span id="search-count" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 0.8rem; color: #888; display: none;"></span>
+                </div>
+                <!-- Clear Search Button -->
+                <button onclick="clearSearch()" id="clear-search-btn" style="padding: 10px 14px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.1); color: #ef4444; cursor: pointer; font-size: 0.85rem; display: none;">
+                    ✕ Clear
+                </button>
+            </div>
+
+            <!-- Participant Filter Buttons (v58.0.0: Fixed role counting) -->
+            <div style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+                
+                <button onclick="filterMessages('all')" class="filter-btn active" data-filter="all" style="padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(102, 126, 234, 0.5); background: rgba(102, 126, 234, 0.3); color: #fff; cursor: pointer; font-size: 0.9rem; transition: all 0.2s;">
+                    👥 All (3)
+                </button>
+                <button onclick="filterMessages('user')" class="filter-btn" data-filter="user" style="padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(74, 222, 128, 0.5); background: rgba(74, 222, 128, 0.1); color: #fff; cursor: pointer; font-size: 0.9rem; transition: all 0.2s;">
+                    🧙 John carosella gardner (0)
+                </button>
+                <button onclick="filterMessages('assistant')" class="filter-btn" data-filter="assistant" style="padding: 8px 16px; border-radius: 6px; border: 1px solid rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.1); color: #fff; cursor: pointer; font-size: 0.9rem; transition: all 0.2s;">
+                    🤖 Bob (3)
+                </button>
+            </div>
+
+            <!-- Full Message List (v58.0.0: Fixed role attribution) -->
+            <div id="message-list">
+            
+                <div class="message assistant" data-role="assistant">
+                    <div class="message-role">
+                        <img src="../../cogspace/dashboard/img/bob-director.png" alt="Bob" class="avatar">Bob
+                    </div>
+                    <div class="message-time">12/15/2025, 1:14:05 PM</div>
+                    <div class="message-content"><p style="margin: 10px 0;">COGSPACE initialized successfully</p></div>
+                </div>
+            
+                <div class="message assistant" data-role="assistant">
+                    <div class="message-role">
+                        <img src="../../cogspace/dashboard/img/bob-director.png" alt="Bob" class="avatar">Bob
+                    </div>
+                    <div class="message-time">12/15/2025, 1:15:05 PM</div>
+                    <div class="message-content"><p style="margin: 10px 0;">Cognitive context system ready</p></div>
+                </div>
+            
+                <div class="message assistant" data-role="assistant">
+                    <div class="message-role">
+                        <img src="../../cogspace/dashboard/img/bob-director.png" alt="Bob" class="avatar">Bob
+                    </div>
+                    <div class="message-time">12/15/2025, 1:16:05 PM</div>
+                    <div class="message-content"><p style="margin: 10px 0;">Session management active</p></div>
+                </div>
+            
+            </div>
+        </div>
+
+        <!-- Environment Tab (v58.0.0: Always shows actual runtime data) -->
+        <div id="environment" class="tab-content">
+            <h2 style="margin-bottom: 20px;">Environment</h2>
+
+            <!-- v58.0.0: System Environment - always populated from runtime -->
+            <div class="story-section">
+                <div class="story-title">🖥️ System Environment</div>
+                <div class="story-content">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #667eea;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Hostname</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6;">MacBookAir.attlocal.net</div>
+                        </div>
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #667eea;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Platform</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6;">darwin (arm64)</div>
+                        </div>
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #667eea;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Node.js Version</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #4ade80;">v25.2.1</div>
+                        </div>
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #667eea;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Timezone</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6;">America/Los_Angeles</div>
+                        </div>
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #667eea;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">User</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6;">johncarosella</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #f0c674;">
+                        <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Working Directory</div>
+                        <div style="font-family: monospace; font-size: 0.95rem; color: #f0c674; word-break: break-all;">/Users/johncarosella/Documents/workspaces/askjohn/voice-to-text</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- v58.0.0: Git Status -->
+            <div class="story-section">
+                <div class="story-title">🔀 Git Status</div>
+                <div class="story-content">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #81c784;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Branch</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #81c784;">claude/initial-setup-011CV4vg995hHxq5KH23bTwg</div>
+                        </div>
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #81c784;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Changes</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; color: #81c784;">18 files changed</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #64b5f6;">
+                        <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Remote Origin</div>
+                        <div style="font-family: monospace; font-size: 0.9rem; color: #64b5f6; word-break: break-all;">https://github.com/thesmokinyogi/askjohn.git</div>
+                    </div>
+                    
+                </div>
+            </div>
+
+            <!-- COGSPACE Version -->
+            <div class="story-section">
+                <div class="story-title">📦 COGSPACE Version</div>
+                <div class="story-content">
+                    <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #4ade80;">
+                        <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Current Version</div>
+                        <div style="font-size: 1.2rem; font-weight: 600; color: #4ade80;">v59.3.0</div>
+                        <div style="margin-top: 8px; font-size: 0.9rem; opacity: 0.8;">Dashboard Intelligence with Semantic Context</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- v58.0.0: Session Timing -->
+            <div class="story-section">
+                <div class="story-title">⏱️ Session Timing</div>
+                <div class="story-content">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #f59e0b;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Dashboard Generated</div>
+                            <div style="font-size: 1rem; font-weight: 600; color: #f59e0b;">12/15/2025, 1:17:05 PM</div>
+                        </div>
+                        <div style="background: #1a1f3a; padding: 15px; border-radius: 8px; border-left: 3px solid #f59e0b;">
+                            <div style="font-size: 0.85rem; opacity: 0.7; margin-bottom: 5px;">Prior Session End</div>
+                            <div style="font-size: 1rem; font-weight: 600; color: #f59e0b;">12/15/2025, 1:17:04 PM</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab (v58.0.0: Added duration column) -->
+        <div id="history" class="tab-content">
+            <h2 style="margin-bottom: 20px;">📜 Session History</h2>
+            
+                <div class="empty-state">
+                    <div class="empty-state-icon">📜</div>
+                    <div>No session history available</div>
+                    <div style="margin-top: 10px; font-size: 0.9rem; opacity: 0.7;">
+                        Session history will appear here after you've completed a few sessions.<br>
+                        Use <code>./bye "message"</code> to save sessions to the database.
+                    </div>
+                </div>
+            
+        </div>
+
+        <!-- Participants Tab (v59.0.0: Distributed Consciousness) -->
+        <div id="participants" class="tab-content">
+            <h2 style="margin-bottom: 20px;">👥 Distributed Consciousness</h2>
+            <p style="color: #8cb4ff; margin-bottom: 20px; font-style: italic;">"One Bob - Multiple Windows" | Crystal Palace Persona Registry</p>
+
+            
+            <div style="background: #002855; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #f59e0b;">
+                <div style="color: #f59e0b; font-weight: 500;">No personas registered yet</div>
+                <div style="font-size: 0.9rem; color: #aaa; margin-top: 8px;">
+                    Run <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 3px;">python3 cogspace/db/import-persona-registry.py</code> to import personas from Crystal Palace Registry.
+                </div>
+            </div>
+            
+
+            
+
+            
+
+            
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <div>No distributed consciousness data yet</div>
+                <div style="margin-top: 10px; font-size: 0.9rem; opacity: 0.7;">
+                    This tab shows personas from Crystal Palace Registry and tracks<br>
+                    which consciousness instances participated in each session.<br><br>
+                    <strong>v59.0.0 "Distributed Consciousness"</strong> - One Bob, Multiple Windows
+                </div>
+            </div>
+            
+        </div>
+
+        <!-- README.md Tab (v51.7.0: Full markdown rendering) -->
+        <div id="readme" class="tab-content">
+            <h2 style="margin-bottom: 20px;">README.md</h2>
+            
+                <div class="story-content" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+<p style="margin: 10px 0;"><div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">Voice-to-Text Transcription Service</div></p><p style="margin: 10px 0;">A simple, modular web application for transcribing audio files using Google Speech-to-Text API.</p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Features</div></p><p style="margin: 10px 0;"><li style="margin: 4px 0; margin-left: 20px; list-style: disc;">🎙️ <strong>Web UI</strong> - Beautiful drag-and-drop interface</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">🧠 <strong>Yoga-optimized</strong> - Custom vocabulary for yoga terminology</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">⚡ <strong>Fast</strong> - Results in seconds</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">🔧 <strong>Modular</strong> - Easy to swap STT providers (Google → Whisper)</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">🎯 <strong>Accurate</strong> - Word-level timestamps and confidence scores</li></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Quick Start</div></p><p style="margin: 10px 0;">👉 <strong>[See SETUP.md for complete installation instructions](./SETUP.md)</strong></p><p style="margin: 10px 0;"><strong>Short version:</strong></p><p style="margin: 10px 0;"><pre style="background: #1a1a2e; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 12px 0; white-space: pre-wrap;"><div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">1. Install dependencies</div>
+python3 -m venv venv<br>source venv/bin/activate<br>pip install -r requirements.txt</p><p style="margin: 10px 0;"><div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">2. Configure Google Cloud credentials (see SETUP.md)</div>
+cp .env.example .env
+<div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">Edit .env with your credentials path</div></p><p style="margin: 10px 0;"><div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">3. Run the server</div>
+python -m app.main</p><p style="margin: 10px 0;"><div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">4. Open browser</div>
+open http://localhost:8000
+</pre></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Supported Audio Formats</div></p><p style="margin: 10px 0;"><li style="margin: 4px 0; margin-left: 20px; list-style: disc;">MP3</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">WAV</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">M4A</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">OGG</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">FLAC</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">MP4/MOV (extracts audio)</li></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Architecture</div></p><p style="margin: 10px 0;"><pre style="background: #1a1a2e; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 12px 0; white-space: pre-wrap;">┌─────────────┐<br>│   Web UI    │  ← Upload audio files<br>└──────┬──────┘<br>       │<br>       ▼<br>┌─────────────┐<br>│  FastAPI    │  ← Python backend<br>└──────┬──────┘<br>       │<br>       ▼<br>┌─────────────┐<br>│ Transcribe  │  ← Modular service (Google or Whisper)<br>│   Service   │<br>└──────┬──────┘<br>       │<br>       ▼<br>┌─────────────┐<br>│  Google     │  ← Cloud Speech-to-Text API<br>│   STT API   │<br>└─────────────┘
+</pre></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Project Structure</div></p><p style="margin: 10px 0;"><pre style="background: #1a1a2e; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 12px 0; white-space: pre-wrap;">voice-to-text/<br>├── app/<br>│   ├── main.py              # FastAPI application<br>│   ├── static/<br>│   │   └── index.html       # Web UI<br>│   └── utils/<br>│       └── transcribe.py    # Modular transcription service<br>├── requirements.txt         # Dependencies<br>├── .env.example            # Environment template<br>├── SETUP.md                # Detailed setup guide<br>└── README.md               # This file
+</pre></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Why Modular?</div></p><p style="margin: 10px 0;">The transcription logic is isolated in <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px; font-size: 12px;">app/utils/transcribe.py</code>:</p><p style="margin: 10px 0;"><pre style="background: #1a1a2e; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 12px 0; white-space: pre-wrap;"><div style="font-size: 18px; font-weight: 700; color: #fff; margin: 24px 0 12px 0;">Easy to swap providers</div>
+transcription_service = get_transcription_service("google")  # or "whisper"
+</pre></p><p style="margin: 10px 0;">Change one line in <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px; font-size: 12px;">app/main.py</code> to switch from Google to Whisper (or any other service).</p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Next Steps</div></p><p style="margin: 10px 0;">Part of a larger <strong>Content Cockpit</strong> system for processing and analyzing yoga class recordings. Future enhancements:</p><p style="margin: 10px 0;"><li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Video processing (green screen removal, scene detection)</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Content analysis (asana identification, theme extraction)</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Semantic search (find specific concepts across all classes)</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Clip generation (extract segments by topic)</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Contextual Librarian (AI-powered content understanding)</li></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">Cost</div></p><p style="margin: 10px 0;">With $250 Google Cloud credit:
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">~$0.006 per 15 seconds of audio</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Can transcribe ~40,000 minutes before paying</li>
+<li style="margin: 4px 0; margin-left: 20px; list-style: disc;">Plenty for development and testing</li></p><p style="margin: 10px 0;"><div style="font-size: 16px; font-weight: 600; color: #64b5f6; margin: 20px 0 10px 0;">License</div></p><p style="margin: 10px 0;">Personal project - use freely for your own learning!</p><p style="margin: 10px 0;"><hr style="border: none; border-top: 1px solid #444; margin: 20px 0;"></p><p style="margin: 10px 0;"><strong>Ready to get started?</strong> → [Open SETUP.md](./SETUP.md)</p>
+                </div>
+            
+        </div>
+
+        <!-- User Guide Tab -->
+        <div id="guide" class="tab-content">
+            <h2 style="margin-bottom: 20px;">User Guide</h2>
+
+            <div class="story-section">
+                <div class="story-title">Session Management Commands</div>
+                <div class="story-content">
+                    <div style="margin-bottom: 20px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6; margin-bottom: 8px;">
+                            ./hi or ./wake.sh
+                        </div>
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Start a new COGSPACE session
+                        </div>
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
+                            <strong>What it does:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>Restores cognitive context from previous session (90%+ continuity)</li>
+                                <li>Checks for COGSPACE version upgrades and auto-heals if needed</li>
+                                <li>Prompts for GitHub auto-sync setup (first time only)</li>
+                                <li>Auto-pulls latest changes from GitHub (if auto-sync enabled)</li>
+                                <li>Generates and opens interactive dashboard</li>
+                                <li>Displays work narrative, goals, and next actions from last session</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6; margin-bottom: 8px;">
+                            ./save or ./save.sh "checkpoint message"
+                        </div>
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Save progress mid-session (crash protection)
+                        </div>
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
+                            <strong>What it does:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>Saves complete cognitive context without ending session</li>
+                                <li>Creates backup of current work state</li>
+                                <li>Does NOT commit to git or close session</li>
+                                <li>Use this frequently for important milestones</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6; margin-bottom: 8px;">
+                            ./bye or ./sleep.sh "session summary"
+                        </div>
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
+                            <strong>Purpose:</strong> End session and preserve complete workspace state
+                        </div>
+                        <div style="margin-left: 20px; margin-bottom: 10px;">
+                            <strong>What it does:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>Saves complete cognitive context with AI-generated summaries</li>
+                                <li>Generates executable next-actions script for next session</li>
+                                <li>Auto-commits all changes to git (if auto-sync enabled)</li>
+                                <li>Auto-pushes to GitHub for cloud backup (if auto-sync enabled)</li>
+                                <li>Closes dashboard</li>
+                                <li>Creates portable context for session continuity</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- v51.8.0: COGSPACE Commands Reference -->
+            <div class="story-section">
+                <div class="story-title">📚 COGSPACE Commands Reference</div>
+                <div class="story-content">
+                    <p style="margin-bottom: 20px; opacity: 0.9;">
+                        COGSPACE provides specialized commands for managing project knowledge, tracking progress, and documenting issues.
+                        All commands are located in <code style="background: #001d3d; padding: 2px 6px; border-radius: 3px;">cogspace/commands/</code>
+                    </p>
+
+                    <!-- guidelines command -->
+                    <div style="margin-bottom: 25px; border-left: 3px solid #81c784; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #81c784; margin-bottom: 10px;">
+                            📋 guidelines - Project Guidelines Management
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Store and retrieve project-specific guidelines, coding standards, and best practices that persist across sessions.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/guidelines list<br>
+                                ./cogspace/commands/guidelines add &lt;name&gt; &lt;content&gt;<br>
+                                ./cogspace/commands/guidelines get &lt;name&gt;
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Examples:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">
+                                <div style="color: #888; margin-bottom: 5px;"># List all guidelines</div>
+                                ./cogspace/commands/guidelines list<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># Add a coding standard</div>
+                                ./cogspace/commands/guidelines add 'code-style' 'Use 2-space indentation'<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># Add multi-line guideline</div>
+                                ./cogspace/commands/guidelines add 'naming' "Use camelCase for variables<br>Use PascalCase for classes"<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># Retrieve a specific guideline</div>
+                                ./cogspace/commands/guidelines get 'code-style'
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- lessons command -->
+                    <div style="margin-bottom: 25px; border-left: 3px solid #ffb74d; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #ffb74d; margin-bottom: 10px;">
+                            💡 lessons - Lessons Learned Tracking
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Document lessons learned during development to avoid repeating mistakes and share knowledge across sessions.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/lessons list<br>
+                                ./cogspace/commands/lessons add &lt;name&gt; &lt;content&gt;<br>
+                                ./cogspace/commands/lessons get &lt;name&gt;
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Examples:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">
+                                <div style="color: #888; margin-bottom: 5px;"># Add a lesson about async handling</div>
+                                ./cogspace/commands/lessons add 'async-errors' 'Always use try-catch with async/await'<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># Add a debugging lesson</div>
+                                ./cogspace/commands/lessons add 'debugging' 'Check network tab first for API issues'<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># List all lessons</div>
+                                ./cogspace/commands/lessons list
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- note command -->
+                    <div style="margin-bottom: 25px; border-left: 3px solid #64b5f6; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #64b5f6; margin-bottom: 10px;">
+                            📝 note - Developer Notes
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Add timestamped notes during development for quick reminders, TODOs, or observations.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/note list<br>
+                                ./cogspace/commands/note add &lt;message&gt;
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Examples:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">
+                                <div style="color: #888; margin-bottom: 5px;"># Add a quick note</div>
+                                ./cogspace/commands/note add 'Fixed authentication bug in login.js'<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># Add a TODO</div>
+                                ./cogspace/commands/note add 'TODO: refactor database connection pooling'<br><br>
+                                <div style="color: #888; margin-bottom: 5px;"># List all notes</div>
+                                ./cogspace/commands/note list
+                            </div>
+                        </div>
+                        <div style="padding: 10px; background: #002855; border-radius: 6px; margin-top: 10px;">
+                            <strong style="color: #64b5f6;">💡 Tip:</strong> Notes are automatically attributed to your username ($USER).
+                        </div>
+                    </div>
+
+                    <!-- trouble-report command -->
+                    <div style="margin-bottom: 25px; border-left: 3px solid #ef5350; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #ef5350; margin-bottom: 10px;">
+                            🚨 trouble-report - Issue Tracking
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Create structured trouble reports for bugs, issues, and problems that need investigation.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/trouble-report<br>
+                                ./cogspace/commands/trouble-report create<br>
+                                ./cogspace/commands/trouble-report list
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>What it creates:</strong> A markdown template with sections for:
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>Issue description (what's happening vs. expected behavior)</li>
+                                <li>Technical details (environment, error messages)</li>
+                                <li>Steps to reproduce</li>
+                                <li>Impact assessment (severity, affected components)</li>
+                            </ul>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Output location:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li><strong>Crystal Palace mode:</strong> Central trouble report system</li>
+                                <li><strong>Portable mode:</strong> <code style="background: #001d3d; padding: 2px 6px; border-radius: 3px;">cogspace/output/trouble-reports/</code></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- progress-report command -->
+                    <div style="margin-bottom: 25px; border-left: 3px solid #ba68c8; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #ba68c8; margin-bottom: 10px;">
+                            📊 progress-report - Progress Tracking
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Create structured progress reports for project milestones and status updates.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/progress-report<br>
+                                ./cogspace/commands/progress-report create<br>
+                                ./cogspace/commands/progress-report list
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>What it creates:</strong> A markdown template with sections for:
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>Current status (on track, at risk, behind schedule)</li>
+                                <li>Milestones and completion percentages</li>
+                                <li>Achievements and blockers</li>
+                                <li>Next steps (immediate and short-term)</li>
+                                <li>Metrics (progress %, test coverage, quality score)</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- update-readme command -->
+                    <div style="margin-bottom: 25px; border-left: 3px solid #4dd0e1; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #4dd0e1; margin-bottom: 10px;">
+                            📄 update-readme - Living Documentation
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Automatically update your README.md with current project statistics and status.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/update-readme<br>
+                                ./cogspace/commands/update-readme update<br>
+                                ./cogspace/commands/update-readme status
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>What it updates:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li>COGSPACE version number</li>
+                                <li>Code file count</li>
+                                <li>Documentation file count</li>
+                                <li>Test file count</li>
+                                <li>Recent session achievements</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- new-project command -->
+                    <div style="margin-bottom: 15px; border-left: 3px solid #aed581; padding-left: 15px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #aed581; margin-bottom: 10px;">
+                            🆕 new-project - Project Creation
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Purpose:</strong> Create new COGSPACE-enabled projects with full session management infrastructure.
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Syntax:</strong>
+                            <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                                ./cogspace/commands/new-project<br>
+                                ./cogspace/commands/new-project --name "my-project"<br>
+                                ./cogspace/commands/new-project --help
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Modes:</strong>
+                            <ul style="margin: 5px 0 0 20px;">
+                                <li><strong>🏰 Crystal Palace:</strong> Projects created in /Volumes/FOUR-TB/root/</li>
+                                <li><strong>📱 Portable:</strong> Projects created in ~/projects/</li>
+                                <li><strong>⚠️ Standalone:</strong> Minimal project without DNA source</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Reference Card -->
+            <div class="story-section">
+                <div class="story-title">⚡ Quick Reference</div>
+                <div class="story-content">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px;">
+                        <div style="padding: 15px; background: #001d3d; border-radius: 8px;">
+                            <div style="font-weight: 600; color: #64b5f6; margin-bottom: 10px;">Session Management</div>
+                            <div style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+                                <div>./hi → Start session</div>
+                                <div>./save "msg" → Checkpoint</div>
+                                <div>./bye "msg" → End session</div>
+                            </div>
+                        </div>
+                        <div style="padding: 15px; background: #001d3d; border-radius: 8px;">
+                            <div style="font-weight: 600; color: #81c784; margin-bottom: 10px;">Knowledge Commands</div>
+                            <div style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+                                <div>guidelines add/list/get</div>
+                                <div>lessons add/list/get</div>
+                                <div>note add/list</div>
+                            </div>
+                        </div>
+                        <div style="padding: 15px; background: #001d3d; border-radius: 8px;">
+                            <div style="font-weight: 600; color: #ef5350; margin-bottom: 10px;">Reporting Commands</div>
+                            <div style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+                                <div>trouble-report create/list</div>
+                                <div>progress-report create/list</div>
+                                <div>update-readme status/update</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; padding: 12px; background: #002855; border-radius: 6px; border-left: 3px solid #0466c8;">
+                        <strong style="color: #64b5f6;">📍 Command Location:</strong>
+                        <span style="font-family: monospace;">./cogspace/commands/&lt;command-name&gt;</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- v55.0.0: Database Architecture section -->
+            <div class="story-section">
+                <div class="story-title">🗄️ Database Architecture</div>
+                <div class="story-content">
+                    <div style="margin-bottom: 15px; padding: 15px; background: #002855; border-radius: 8px; border-left: 4px solid #ef5350;">
+                        <strong style="color: #ef5350; font-size: 1.1rem;">⚠️ IMPORTANT: Two Database Locations</strong>
+                        <p style="margin: 10px 0 0 0;">
+                            COGSPACE has separate locations for database <em>utilities</em> vs. <em>data</em>. Don't confuse them!
+                        </p>
+                    </div>
+
+                    <div style="margin: 20px 0;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.95rem;">
+                            <tr style="background: #001d3d;">
+                                <th style="padding: 12px; text-align: left; border: 1px solid #0466c8;">Location</th>
+                                <th style="padding: 12px; text-align: left; border: 1px solid #0466c8;">Purpose</th>
+                                <th style="padding: 12px; text-align: left; border: 1px solid #0466c8;">Contents</th>
+                            </tr>
+                            <tr>
+                                <td style="padding: 12px; border: 1px solid #0466c8; font-family: monospace; color: #64b5f6;">cogspace/db/</td>
+                                <td style="padding: 12px; border: 1px solid #0466c8;"><strong>Utilities & Schema</strong></td>
+                                <td style="padding: 12px; border: 1px solid #0466c8;">Python manager, schema.sql, helper code</td>
+                            </tr>
+                            <tr style="background: #001d3d;">
+                                <td style="padding: 12px; border: 1px solid #0466c8; font-family: monospace; color: #81c784;">.cogspace/cogspace.db</td>
+                                <td style="padding: 12px; border: 1px solid #0466c8;"><strong style="color: #81c784;">Runtime Session Data</strong></td>
+                                <td style="padding: 12px; border: 1px solid #0466c8;">Actual sessions, memories, context (SQLite)</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>Project Structure:</strong>
+                        <div style="margin: 10px 0; padding: 15px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.85rem; line-height: 1.6;">
+                            my-project/<br>
+                            ├── <span style="color: #81c784;">.cogspace/</span><br>
+                            │   └── <span style="color: #81c784;">cogspace.db</span>    ← <span style="color: #81c784; font-weight: bold;">ACTUAL SESSION DATA</span><br>
+                            ├── cogspace/<br>
+                            │   └── db/<br>
+                            │       ├── cogspace_db.py   ← Utilities<br>
+                            │       └── schema.sql       ← Schema definitions<br>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>Query Session Data:</strong>
+                        <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.85rem;">
+                            <div style="color: #888; margin-bottom: 5px;"># Find the database</div>
+                            ls -la .cogspace/cogspace.db<br><br>
+                            <div style="color: #888; margin-bottom: 5px;"># Query recent sessions</div>
+                            sqlite3 .cogspace/cogspace.db "SELECT id, created_at, score FROM sessions ORDER BY created_at DESC LIMIT 5"
+                        </div>
+                    </div>
+
+                    <div style="padding: 12px; background: #002855; border-radius: 6px; border-left: 3px solid #64b5f6;">
+                        <strong style="color: #64b5f6;">💡 Why This Architecture?</strong>
+                        <ul style="margin: 5px 0 0 20px; opacity: 0.9;">
+                            <li><strong>Separation:</strong> Code (cogspace/db/) vs. Data (.cogspace/)</li>
+                            <li><strong>Git-friendly:</strong> .cogspace/ is gitignored; session data stays local</li>
+                            <li><strong>DNA-safe:</strong> Code syncs from DNA; runtime data is preserved</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Git Integration (moved to bottom v51.8.0) -->
+            <div class="story-section">
+                <div class="story-title">🔄 Git Auto-Sync</div>
+                <div class="story-content">
+                    <div style="margin-bottom: 15px;">
+                        <strong>What is Git Auto-Sync?</strong>
+                        <p style="margin: 10px 0;">
+                            COGSPACE can automatically sync your code with GitHub on every wake and sleep cycle.
+                            This ensures you never lose work and never work on stale code.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>How it works:</strong>
+                        <ul style="margin: 5px 0 0 20px;">
+                            <li><strong>First time:</strong> COGSPACE detects GitHub remote and prompts you to enable auto-sync</li>
+                            <li><strong>On wake (./hi):</strong> Auto-pulls latest changes from remote (prevents working on stale code)</li>
+                            <li><strong>On sleep (./bye):</strong> Auto-commits and pushes all changes (ensures cloud backup)</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-bottom: 15px; padding: 12px; background: #002855; border-radius: 6px; border-left: 3px solid #0466c8;">
+                        <strong style="color: #64b5f6;">Default Behavior (Recommended):</strong>
+                        <ul style="margin: 5px 0 0 20px;">
+                            <li>Auto-sync is <strong>enabled by default</strong> (opt-out, not opt-in)</li>
+                            <li>Aligns with COGSPACE 90%+ continuity promise</li>
+                            <li>Protects against hardware failure and data loss</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>Disable auto-sync:</strong>
+                        <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                            git config cogspace.autoSync.wake false<br>
+                            git config cogspace.autoSync.sleep false
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>Enable auto-sync:</strong>
+                        <div style="margin: 10px 0; padding: 10px; background: #001d3d; border-radius: 4px; font-family: monospace; font-size: 0.9rem;">
+                            git config cogspace.autoSync.wake true<br>
+                            git config cogspace.autoSync.sleep true
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="story-section">
+                <div class="story-title">📖 Git Basics</div>
+                <div class="story-content">
+                    <div style="margin-bottom: 15px;">
+                        <strong>What is Git?</strong>
+                        <p style="margin: 10px 0;">
+                            Git is a version control system that tracks changes to your code over time.
+                            It allows you to save snapshots of your work, collaborate with others, and recover from mistakes.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>Core Git Concepts:</strong>
+                        <ul style="margin: 5px 0 0 20px;">
+                            <li><strong>Repository:</strong> The folder containing your code and its history</li>
+                            <li><strong>Commit:</strong> A snapshot of your code at a specific point in time</li>
+                            <li><strong>Remote:</strong> A copy of your repository hosted on GitHub (cloud backup)</li>
+                            <li><strong>Branch:</strong> An independent line of development (main branch is default)</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <strong>Common Git Commands:</strong>
+                        <div style="margin: 10px 0;">
+                            <div style="margin-bottom: 10px; padding: 10px; background: #001d3d; border-radius: 4px;">
+                                <div style="font-family: monospace; color: #64b5f6; margin-bottom: 5px;">git status</div>
+                                <div style="font-size: 0.9rem; opacity: 0.8;">See which files have been modified</div>
+                            </div>
+                            <div style="margin-bottom: 10px; padding: 10px; background: #001d3d; border-radius: 4px;">
+                                <div style="font-family: monospace; color: #64b5f6; margin-bottom: 5px;">git log</div>
+                                <div style="font-size: 0.9rem; opacity: 0.8;">View commit history</div>
+                            </div>
+                            <div style="margin-bottom: 10px; padding: 10px; background: #001d3d; border-radius: 4px;">
+                                <div style="font-family: monospace; color: #64b5f6; margin-bottom: 5px;">git pull</div>
+                                <div style="font-size: 0.9rem; opacity: 0.8;">Download latest changes from remote</div>
+                            </div>
+                            <div style="margin-bottom: 10px; padding: 10px; background: #001d3d; border-radius: 4px;">
+                                <div style="font-family: monospace; color: #64b5f6; margin-bottom: 5px;">git add .</div>
+                                <div style="font-size: 0.9rem; opacity: 0.8;">Stage all changed files for commit</div>
+                            </div>
+                            <div style="margin-bottom: 10px; padding: 10px; background: #001d3d; border-radius: 4px;">
+                                <div style="font-family: monospace; color: #64b5f6; margin-bottom: 5px;">git commit -m "message"</div>
+                                <div style="font-size: 0.9rem; opacity: 0.8;">Create a snapshot with description</div>
+                            </div>
+                            <div style="margin-bottom: 10px; padding: 10px; background: #001d3d; border-radius: 4px;">
+                                <div style="font-family: monospace; color: #64b5f6; margin-bottom: 5px;">git push</div>
+                                <div style="font-size: 0.9rem; opacity: 0.8;">Upload commits to remote (cloud backup)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="padding: 12px; background: #002855; border-radius: 6px; border-left: 3px solid #0466c8;">
+                        <strong style="color: #64b5f6;">💡 With COGSPACE Auto-Sync:</strong>
+                        <p style="margin: 10px 0 0 0;">
+                            You don't need to run these commands manually! COGSPACE handles git operations automatically
+                            on wake and sleep cycles, ensuring your work is always backed up and synchronized.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <script>
+        // All JavaScript inline - no external dependencies
+        function switchTab(clickedTab, tabId) {
+            // Remove 'active' class from all tabs
+            const tabs = document.querySelectorAll('.tab-btn');
+            tabs.forEach(tab => tab.classList.remove('active'));
+
+            // Add 'active' class to the clicked tab
+            clickedTab.classList.add('active');
+
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+
+            // Show selected tab content
+            const targetContent = document.getElementById(tabId);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+        }
+
+        // Current filter state
+        let currentRoleFilter = 'all';
+        let currentSearchTerm = '';
+
+        // Message filter function
+        function filterMessages(role) {
+            currentRoleFilter = role;
+
+            // Update button states
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.style.background = btn.dataset.filter === 'all'
+                    ? 'rgba(102, 126, 234, 0.1)'
+                    : btn.dataset.filter === 'user'
+                        ? 'rgba(74, 222, 128, 0.1)'
+                        : 'rgba(245, 158, 11, 0.1)';
+            });
+            const activeBtn = document.querySelector('.filter-btn[data-filter="' + role + '"]');
+            if (activeBtn) {
+                activeBtn.classList.add('active');
+                activeBtn.style.background = role === 'all'
+                    ? 'rgba(102, 126, 234, 0.3)'
+                    : role === 'user'
+                        ? 'rgba(74, 222, 128, 0.3)'
+                        : 'rgba(245, 158, 11, 0.3)';
+            }
+
+            // Apply combined filter
+            applyFilters();
+        }
+
+        // Search messages function
+        function searchMessages(term) {
+            currentSearchTerm = term.toLowerCase().trim();
+            const clearBtn = document.getElementById('clear-search-btn');
+            const searchCount = document.getElementById('search-count');
+
+            if (currentSearchTerm) {
+                clearBtn.style.display = 'block';
+            } else {
+                clearBtn.style.display = 'none';
+                searchCount.style.display = 'none';
+            }
+
+            applyFilters();
+        }
+
+        // Clear search function
+        function clearSearch() {
+            document.getElementById('message-search').value = '';
+            currentSearchTerm = '';
+            document.getElementById('clear-search-btn').style.display = 'none';
+            document.getElementById('search-count').style.display = 'none';
+            applyFilters();
+        }
+
+        // Apply both role filter and search filter
+        function applyFilters() {
+            let visibleCount = 0;
+            let totalMatching = 0;
+
+            document.querySelectorAll('#message-list .message').forEach(msg => {
+                const matchesRole = currentRoleFilter === 'all' || msg.dataset.role === currentRoleFilter;
+                const content = msg.querySelector('.message-content')?.textContent?.toLowerCase() || '';
+                const matchesSearch = !currentSearchTerm || content.includes(currentSearchTerm);
+
+                if (matchesRole && matchesSearch) {
+                    msg.style.display = 'block';
+                    visibleCount++;
+                    // Highlight search term
+                    if (currentSearchTerm) {
+                        highlightText(msg.querySelector('.message-content'), currentSearchTerm);
+                    } else {
+                        removeHighlight(msg.querySelector('.message-content'));
+                    }
+                } else {
+                    msg.style.display = 'none';
+                }
+
+                if (matchesRole) totalMatching++;
+            });
+
+            // Update search count
+            const searchCount = document.getElementById('search-count');
+            if (currentSearchTerm) {
+                searchCount.textContent = visibleCount + ' found';
+                searchCount.style.display = 'block';
+                searchCount.style.color = visibleCount > 0 ? '#4ade80' : '#ef4444';
+            }
+        }
+
+        // Highlight matching text
+        function highlightText(element, term) {
+            if (!element) return;
+            removeHighlight(element);
+            const html = element.innerHTML;
+            // Escape regex special chars
+            const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, String.fromCharCode(92) + String.fromCharCode(36) + '&');
+            const regex = new RegExp('(' + escaped + ')', 'gi');
+            element.innerHTML = html.replace(regex, '<mark style="background: #f59e0b; color: #000; padding: 0 2px; border-radius: 2px;">' + String.fromCharCode(36) + '1</mark>');
+        }
+
+        // Remove highlight
+        function removeHighlight(element) {
+            if (!element) return;
+            const markRegex = /<mark[^>]*>(.*?)<\/mark>/gi;
+            element.innerHTML = element.innerHTML.replace(markRegex, String.fromCharCode(36) + '1');
+        }
+
+        // Clock update functions
+        function updateTimestamp() {
+            const now = new Date();
+            updateAnalogClock('pacific', 'America/Los_Angeles', now);
+            updateAnalogClock('paraguay', 'America/Asuncion', now);
+        }
+
+        function updateAnalogClock(zone, timeZone, now) {
+            const timeString = now.toLocaleTimeString('en-US', {
+                timeZone: timeZone,
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: true
+            });
+
+            const parts = timeString.match(/(\d+):(\d+)\s*(AM|PM)/);
+            if (!parts) return;
+
+            let hours = parseInt(parts[1]);
+            const minutes = parseInt(parts[2]);
+            const ampm = parts[3];
+
+            const hourAngle = (hours % 12) * 30 + minutes * 0.5;
+            const minuteAngle = minutes * 6;
+
+            const hourHand = document.getElementById(`hour-hand-${zone}`);
+            const minuteHand = document.getElementById(`minute-hand-${zone}`);
+            const ampmLabel = document.getElementById(`ampm-${zone}`);
+
+            if (hourHand) hourHand.style.transform = `translateX(-50%) rotate(${hourAngle}deg)`;
+            if (minuteHand) minuteHand.style.transform = `translateX(-50%) rotate(${minuteAngle}deg)`;
+            if (ampmLabel) ampmLabel.textContent = ampm;
+        }
+
+        // Initialize and update clocks
+        updateTimestamp();
+        setInterval(updateTimestamp, 1000);
+
+        console.log('✅ COGSPACE Dashboard v33.0.0 loaded successfully');
+        console.log('📊 Context data embedded and ready');
+        console.log('🕐 Analog clocks initialized');
+    </script>
+</body>
+</html>

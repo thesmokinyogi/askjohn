@@ -1,0 +1,120 @@
+#!/bin/bash
+# COGSPACE v55.0.0 - Guidelines Management
+# Manage project guidelines and best practices
+# v51.6.0: Fixed multi-line content handling via JSON encoding
+# v55.0.0: Fixed symlink resolution for PROJECT_ROOT calculation
+
+# Resolve symlink before calculating PROJECT_ROOT
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ -L "$SCRIPT_PATH" ]]; then
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+fi
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+# Read version dynamically - NEVER hardcode!
+VERSION=$(jq -r '.version // "unknown"' "$PROJECT_ROOT/cogspace/cogspace-version.json" 2>/dev/null || echo "unknown")
+
+case "$1" in
+    "list")
+        node -e "const s=require('./cogspace/analyzers/serializer.cjs'); (async()=>console.log(await new s().manageGuidelines('list')))()"
+        ;;
+    "add")
+        if [[ -z "$2" ]] || [[ -z "$3" ]]; then
+            echo "Usage: guidelines add <name> <content>"
+            echo ""
+            echo "Example: guidelines add 'code-style' 'Use 2-space indentation'"
+            echo "Example: guidelines add 'naming' \"Multi-line"
+            echo "  guideline content\""
+            exit 1
+        fi
+        GUIDELINE_NAME="$2"
+        shift 2
+        GUIDELINE_CONTENT="$*"
+
+        # v51.6.0: Use JSON encoding to safely pass multi-line content
+        if command -v jq &>/dev/null; then
+            JSON_PAYLOAD=$(jq -n \
+                --arg name "$GUIDELINE_NAME" \
+                --arg content "$GUIDELINE_CONTENT" \
+                '{name: $name, content: $content}')
+
+            echo "$JSON_PAYLOAD" | node -e "
+const s = require('./cogspace/analyzers/serializer.cjs');
+let data = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => data += chunk);
+process.stdin.on('end', async () => {
+    try {
+        const parsed = JSON.parse(data);
+        await new s().manageGuidelines('add', parsed.name, parsed.content);
+    } catch (e) {
+        console.error('Error adding guideline:', e.message);
+        process.exit(1);
+    }
+});
+"
+        else
+            # Fallback: Write content to temp file
+            TEMP_FILE=$(mktemp)
+            echo "$GUIDELINE_CONTENT" > "$TEMP_FILE"
+
+            node -e "
+const s = require('./cogspace/analyzers/serializer.cjs');
+const fs = require('fs');
+(async () => {
+    try {
+        const content = fs.readFileSync('$TEMP_FILE', 'utf8');
+        await new s().manageGuidelines('add', '$GUIDELINE_NAME', content);
+    } catch (e) {
+        console.error('Error adding guideline:', e.message);
+        process.exit(1);
+    }
+})();
+"
+            rm -f "$TEMP_FILE"
+        fi
+        echo "✅ Guideline added: $GUIDELINE_NAME"
+        ;;
+    "get")
+        if [[ -z "$2" ]]; then
+            echo "Usage: guidelines get <name>"
+            exit 1
+        fi
+        # Name escaping is safe - single line, no special chars typically
+        ESCAPED_NAME=$(echo "$2" | sed "s/'/\\\\'/g")
+        node -e "const s=require('./cogspace/analyzers/serializer.cjs'); (async()=>console.log(await new s().manageGuidelines('get','${ESCAPED_NAME}')))()"
+        ;;
+    "help"|"--help"|"-h")
+        echo "COGSPACE v$VERSION - Guidelines Management"
+        echo ""
+        echo "Usage: guidelines [command] [options]"
+        echo ""
+        echo "Commands:"
+        echo "  list                      List all guidelines"
+        echo "  add <name> <content>      Add new guideline"
+        echo "  get <name>                Get specific guideline"
+        echo "  help                      Show this help message"
+        echo ""
+        echo "Examples:"
+        echo "  guidelines list"
+        echo "  guidelines add 'code-style' 'Use 2-space indentation'"
+        echo "  guidelines add 'naming' \"Multi-line"
+        echo "    guideline with 'quotes'\""
+        echo "  guidelines get 'code-style'"
+        ;;
+    *)
+        echo "COGSPACE v$VERSION - Guidelines Management"
+        echo ""
+        echo "Usage: guidelines [command] [options]"
+        echo ""
+        echo "Commands:"
+        echo "  list                      List all guidelines"
+        echo "  add <name> <content>      Add new guideline"
+        echo "  get <name>                Get specific guideline"
+        echo "  help                      Show this help message"
+        ;;
+esac

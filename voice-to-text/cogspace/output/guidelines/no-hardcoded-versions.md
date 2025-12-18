@@ -1,0 +1,1 @@
+NEVER hardcode version numbers in code comments or docstrings. The ONLY source of truth for COGSPACE version is cogspace/cogspace-version.json. Use get_cogspace_version() in Python or getVersion() in JavaScript. Version comments like '# v59.2.0:' create maintenance burden and become stale. Document WHAT was changed, not WHEN - the git history handles that.

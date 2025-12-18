@@ -1,0 +1,10 @@
+#!/bin/bash
+# COGSPACE v40.0.0
+# Guidelines management quick command
+case "$1" in
+    "list") node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>console.log(await new s().manageGuidelines('list')))()" ;;
+    "add") node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>await new s().manageGuidelines('add','$2','$3'))()" ;;
+    "get") node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>console.log(await new s().manageGuidelines('get','$2')))()" ;;
+    *) echo "Usage: guidelines [list|add|get] [name] [content]" ;;
+esac
+

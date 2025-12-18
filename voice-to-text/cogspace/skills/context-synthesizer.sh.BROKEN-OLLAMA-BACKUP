@@ -1,0 +1,306 @@
+#!/bin/bash
+# COGSPACE v40.0.0
+# COGSPACE Revolution v20.0.0 - Context Synthesizer Skill
+# Brilliant Binary Speed Implementation by Bob
+# Mission Critical: AI-powered session context synthesis
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+#═══════════════════════════════════════════════════════════════════════════════
+# CONTEXT SYNTHESIZER - Core Intelligence Engine
+#═══════════════════════════════════════════════════════════════════════════════
+
+cogspace_synthesize_context() {
+  local session_id="$1"
+  local git_changes="$2"
+  local file_changes="$3"
+  local conversation="$4"
+  local work_summary="$5"
+
+  # Validate inputs
+  if [[ -z "$session_id" ]]; then
+    echo "{\"error\": \"session_id required\"}" >&2
+    return 1
+  fi
+
+  # Extract key information
+  local files_array=$(echo "$file_changes" | tr '\n' ' ' | jq -R 'split(" ") | map(select(length > 0))' 2>/dev/null || echo '[]')
+  local technologies=$(cogspace_detect_technologies "$file_changes" 2>/dev/null || echo '[]')
+  local change_type=$(cogspace_classify_changes "$git_changes")
+  local complexity=$(cogspace_assess_complexity "$git_changes" "$file_changes")
+
+  # Check if Ollama is available for AI synthesis
+  if command -v ollama >/dev/null 2>&1 && ollama list 2>/dev/null | grep -q "qwen-coder"; then
+    # AI-powered synthesis
+    local synthesized=$(cogspace_ai_synthesize "$session_id" "$git_changes" "$file_changes" "$conversation" "$work_summary")
+    echo "$synthesized"
+  else
+    # Fallback: Structured extraction without AI
+    # Safely escape git changes for JSON
+    local git_summary=$(echo "$git_changes" | head -20 | jq -Rs . 2>/dev/null || echo '""')
+    local git_stats=$(git diff --stat HEAD 2>/dev/null | jq -Rs . 2>/dev/null || echo '""')
+
+    local fallback_context=$(cat <<EOF
+{
+  "sessionId": "$session_id",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "technicalSummary": {
+    "filesChanged": $(echo "$files_array" | jq -c . 2>/dev/null || echo '[]'),
+    "technologies": $(echo "$technologies" | jq -c . 2>/dev/null || echo '[]'),
+    "changeType": $(echo "$change_type" | jq -Rs . 2>/dev/null || echo '""'),
+    "complexity": $(echo "$complexity" | jq -Rs . 2>/dev/null || echo '"unknown"')
+  },
+  "workSummary": $(echo "$work_summary" | jq -Rs . 2>/dev/null || echo '""'),
+  "conversation": $(echo "$conversation" | jq -Rs . 2>/dev/null || echo '""'),
+  "gitChanges": {
+    "summary": $git_summary,
+    "stats": $git_stats
+  },
+  "synthesisMethod": "fallback",
+  "synthesisQuality": 70
+}
+EOF
+)
+    echo "$fallback_context"
+  fi
+}
+
+cogspace_ai_synthesize() {
+  local session_id="$1"
+  local git_changes="$2"
+  local file_changes="$3"
+  local conversation="$4"
+  local work_summary="$5"
+
+  # Prepare prompt for AI synthesis
+  local prompt=$(cat <<EOF
+You are an expert software development session analyst. Analyze this development session and create a comprehensive, structured context summary.
+
+SESSION ID: $session_id
+FILES CHANGED: $file_changes
+WORK SUMMARY: $work_summary
+
+GIT CHANGES:
+$git_changes
+
+CONVERSATION SUMMARY:
+$conversation
+
+Create a JSON response with:
+1. technicalSummary: What was built/changed (be specific about implementation details)
+2. keyDecisions: Why certain approaches were chosen (architectural reasoning)
+3. challengesFaced: Problems encountered and how they were solved
+4. nextSteps: Logical continuation points for future sessions
+5. crossReferences: Related patterns, dependencies, or previous work
+6. insights: Important learnings or discoveries from this session
+7. quality: Assessment of code quality and completeness (0-100)
+
+Output ONLY valid JSON, no markdown formatting.
+EOF
+)
+
+  # Call Ollama with timeout and error handling
+  local ai_response=$(timeout 30s ollama run qwen-coder-2.5-7b "$prompt" 2>/dev/null || echo "{\"error\": \"AI synthesis timeout\"}")
+
+  # Validate JSON response
+  if echo "$ai_response" | jq empty 2>/dev/null; then
+    # Valid JSON, enhance with metadata
+    local enhanced=$(echo "$ai_response" | jq --arg sid "$session_id" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {sessionId: $sid, timestamp: $ts, synthesisMethod: "ai", synthesisQuality: 95}')
+    echo "$enhanced"
+  else
+    # Invalid JSON, fallback
+    echo "{\"error\": \"AI synthesis failed\", \"raw\": $(echo "$ai_response" | jq -Rs .)}"
+  fi
+}
+
+cogspace_detect_technologies() {
+  local files="$1"
+
+  local techs=()
+
+  # Detect by file extensions
+  if echo "$files" | grep -q "\.tsx\?$"; then
+    techs+=("TypeScript")
+  fi
+  if echo "$files" | grep -q "\.jsx\?$"; then
+    techs+=("JavaScript")
+  fi
+  if echo "$files" | grep -q "\.py$"; then
+    techs+=("Python")
+  fi
+  if echo "$files" | grep -q "\.go$"; then
+    techs+=("Golang")
+  fi
+  if echo "$files" | grep -q "\.rs$"; then
+    techs+=("Rust")
+  fi
+  if echo "$files" | grep -q "\.java$"; then
+    techs+=("Java")
+  fi
+  if echo "$files" | grep -q "\.rb$"; then
+    techs+=("Ruby")
+  fi
+  if echo "$files" | grep -q "\.sh$"; then
+    techs+=("Bash")
+  fi
+  if echo "$files" | grep -q "\.sql$"; then
+    techs+=("SQL")
+  fi
+
+  # Detect frameworks
+  if [[ -f "package.json" ]]; then
+    if grep -q "\"react\"" package.json 2>/dev/null; then
+      techs+=("React")
+    fi
+    if grep -q "\"vue\"" package.json 2>/dev/null; then
+      techs+=("Vue")
+    fi
+    if grep -q "\"next\"" package.json 2>/dev/null; then
+      techs+=("Next.js")
+    fi
+    if grep -q "\"express\"" package.json 2>/dev/null; then
+      techs+=("Express")
+    fi
+  fi
+
+  # Convert to JSON array
+  printf '%s\n' "${techs[@]}" | jq -R . | jq -s .
+}
+
+cogspace_classify_changes() {
+  local git_diff="$1"
+
+  local added=$(echo "$git_diff" | grep "^+" | wc -l)
+  local removed=$(echo "$git_diff" | grep "^-" | wc -l)
+  local total=$((added + removed))
+
+  if [[ $total -eq 0 ]]; then
+    echo "no_changes"
+  elif [[ $added -gt $((removed * 3)) ]]; then
+    echo "feature_addition"
+  elif [[ $removed -gt $((added * 3)) ]]; then
+    echo "code_removal"
+  elif [[ $total -lt 50 ]]; then
+    echo "bug_fix"
+  elif [[ $total -lt 200 ]]; then
+    echo "enhancement"
+  else
+    echo "major_refactor"
+  fi
+}
+
+cogspace_assess_complexity() {
+  local git_diff="$1"
+  local files="$2"
+
+  local file_count=$(echo "$files" | wc -w)
+  local line_count=$(echo "$git_diff" | wc -l)
+  local function_changes=$(echo "$git_diff" | grep -E "(function|def |const .* = |class )" | wc -l)
+
+  local complexity_score=0
+
+  # File count factor
+  if [[ $file_count -gt 20 ]]; then
+    complexity_score=$((complexity_score + 40))
+  elif [[ $file_count -gt 10 ]]; then
+    complexity_score=$((complexity_score + 25))
+  elif [[ $file_count -gt 5 ]]; then
+    complexity_score=$((complexity_score + 15))
+  else
+    complexity_score=$((complexity_score + 5))
+  fi
+
+  # Line count factor
+  if [[ $line_count -gt 1000 ]]; then
+    complexity_score=$((complexity_score + 40))
+  elif [[ $line_count -gt 500 ]]; then
+    complexity_score=$((complexity_score + 25))
+  elif [[ $line_count -gt 200 ]]; then
+    complexity_score=$((complexity_score + 15))
+  else
+    complexity_score=$((complexity_score + 5))
+  fi
+
+  # Function changes factor
+  if [[ $function_changes -gt 20 ]]; then
+    complexity_score=$((complexity_score + 20))
+  elif [[ $function_changes -gt 10 ]]; then
+    complexity_score=$((complexity_score + 10))
+  else
+    complexity_score=$((complexity_score + 5))
+  fi
+
+  echo "$complexity_score"
+}
+
+cogspace_extract_conversation_summary() {
+  # This function extracts conversation context from the current Claude session
+  # In actual implementation, this would parse the session context
+
+  # For now, use work summary and git messages as proxy
+  local recent_commits=$(git log --oneline -5 2>/dev/null || echo "")
+  local work_summary="${WORK_SUMMARY:-Session work completed}"
+
+  cat <<EOF
+Development session focused on: $work_summary
+
+Recent work includes:
+$recent_commits
+
+Key conversation topics detected from commit messages and work summary.
+EOF
+}
+
+cogspace_extract_key_topics() {
+  # Extract key topics from conversation and git messages
+  local commits=$(git log --oneline -10 2>/dev/null || echo "")
+  local work="${WORK_SUMMARY:-}"
+
+  # Simple keyword extraction
+  echo "$commits $work" | \
+    tr '[:upper:]' '[:lower:]' | \
+    grep -oE '\b(implement|fix|add|update|refactor|optimize|create|build|enhance|improve)\b' | \
+    sort | uniq
+}
+
+cogspace_extract_decisions() {
+  # Extract architectural decisions from commits
+  git log --oneline -10 2>/dev/null | \
+    grep -iE '(choose|decide|switch|migrate|adopt|use)' || \
+    echo "No explicit decisions found in recent commits"
+}
+
+cogspace_extract_code_references() {
+  # Extract file and function references
+  git diff --stat HEAD 2>/dev/null | \
+    awk '{print $1}' | \
+    grep -v "^$" | \
+    head -20
+}
+
+#═══════════════════════════════════════════════════════════════════════════════
+# CONTEXT SYNTHESIS - Main Entry Point
+#═══════════════════════════════════════════════════════════════════════════════
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  # Script called directly for testing
+  echo -e "${CYAN}🧠 COGSPACE Context Synthesizer - Test Mode${NC}"
+
+  SESSION_ID="${1:-test-$(date +%s)}"
+  GIT_CHANGES=$(git diff HEAD 2>/dev/null || echo "No git changes")
+  FILE_CHANGES=$(git diff --name-only HEAD 2>/dev/null || echo "")
+  CONVERSATION="Test conversation context"
+  WORK_SUMMARY="${2:-Test work summary}"
+
+  RESULT=$(cogspace_synthesize_context "$SESSION_ID" "$GIT_CHANGES" "$FILE_CHANGES" "$CONVERSATION" "$WORK_SUMMARY")
+
+  echo "$RESULT" | jq .
+fi
+
+

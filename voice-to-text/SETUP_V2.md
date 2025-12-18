@@ -109,7 +109,7 @@ Google generates specific filenames when you download service account keys. They
 
 ```bash
 # List all credential files in your credentials folder
-ls ~/Documents/GitHub/credentials/*.json
+ls ~/Documents/workspaces/credentials/*.json
 ```
 
 Copy the FULL filename you see (including the path).
@@ -123,7 +123,7 @@ Your project ID includes a numeric suffix. Don't guess - get it exactly:
 gcloud projects list
 
 # Or check the credentials file
-cat ~/Documents/GitHub/credentials/YOUR-FILE-NAME.json | grep project_id
+cat ~/Documents/workspaces/credentials/YOUR-FILE-NAME.json | grep project_id
 ```
 
 The project ID will look like: `voice-to-text-dev-477522` (not just `voice-to-text-dev`)
@@ -137,7 +137,7 @@ The project ID will look like: `voice-to-text-dev-477522` (not just `voice-to-te
 STT_PROVIDER=google
 
 # TACTICAL: Google-specific configuration
-GOOGLE_APPLICATION_CREDENTIALS=/Users/johncarosella/Documents/GitHub/credentials/voice-to-text-dev-477522-eacae7e41318.json
+GOOGLE_APPLICATION_CREDENTIALS=/Users/johncarosella/Documents/workspaces/credentials/voice-to-text-dev-477522-eacae7e41318.json
 GOOGLE_CLOUD_PROJECT=voice-to-text-dev-477522
 GCS_BUCKET_NAME=voice-to-text-audio-jc
 GOOGLE_MODEL=long

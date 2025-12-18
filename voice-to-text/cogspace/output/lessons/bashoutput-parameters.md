@@ -1,0 +1,1 @@
+BashOutput tool only accepts 'bash_id' (required) and 'filter' (optional) parameters. Do NOT use 'block' or 'wait_up_to' - those are AgentOutputTool parameters. When tool errors occur, acknowledge them transparently rather than silently working around them.

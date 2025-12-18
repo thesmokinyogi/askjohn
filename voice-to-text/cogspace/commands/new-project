@@ -1,0 +1,893 @@
+#!/bin/bash
+# COGSPACE v55.0.0 - New Project Creation
+# v55.0.0: Fixed symlink resolution for PROJECT_ROOT calculation + dynamic versioning
+# v51.6.0: Updated all commands to v51.6.0
+# v50.0.0 FIX: Check cogspace-version.json instead of deprecated .version file
+# Enhanced Crystal Palace Project Creation System with AITCL integration
+# Supports both interactive (human) and scriptable (AI/automation) modes
+
+set -euo pipefail
+
+# Color definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Resolve symlink before calculating paths
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ -L "$SCRIPT_PATH" ]]; then
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+# Configuration
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+
+# Read version dynamically - NEVER hardcode!
+NEW_PROJECT_VERSION=$(jq -r '.version // "55.0.0"' "$SCRIPT_DIR/../cogspace-version.json" 2>/dev/null || echo "55.0.0")
+
+# DNA Source Resolution (v35.0.0+ architecture)
+# Tiered fallback: Crystal Palace → GitHub → Cache → Standalone
+COGSPACE_DNA_REPO="howeirdo/cogspace-remote-dna"
+COGSPACE_DNA_CACHE="$HOME/.cogspace/dna"
+COGSPACE_MODE="unknown"
+DNA_SOURCE=""
+
+resolve_dna_source() {
+    # Tier 1: Crystal Palace Local (legacy - for transition period)
+    if [[ -d "/Volumes/FOUR-TB/cogspace-dna-source/current" ]]; then
+        DNA_SOURCE="/Volumes/FOUR-TB/cogspace-dna-source/current"
+        COGSPACE_MODE="crystal-palace"
+        return 0
+    fi
+
+    # Tier 2: Update from GitHub if possible, then use cache
+    if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+        mkdir -p "$COGSPACE_DNA_CACHE"
+        if [[ -d "$COGSPACE_DNA_CACHE/.git" ]]; then
+            # Update existing cache silently
+            git -C "$COGSPACE_DNA_CACHE" pull --quiet 2>/dev/null || true
+        else
+            # Fresh clone
+            gh repo clone "$COGSPACE_DNA_REPO" "$COGSPACE_DNA_CACHE" --depth 1 2>/dev/null || true
+        fi
+    fi
+
+    # Tier 3: Use cached DNA (whether just updated or from previous session)
+    # v50.0.0: Check cogspace-version.json instead of deprecated .version file
+    if [[ -f "$COGSPACE_DNA_CACHE/cogspace/cogspace-version.json" ]]; then
+        DNA_SOURCE="$COGSPACE_DNA_CACHE"
+        COGSPACE_MODE="portable"
+        return 0
+    fi
+
+    # Tier 4: No DNA available - standalone mode
+    DNA_SOURCE=""
+    COGSPACE_MODE="standalone"
+    return 1
+}
+
+# Resolve DNA source first
+resolve_dna_source || true
+
+# Set COGSPACE_DIR from resolved DNA_SOURCE
+COGSPACE_DIR="${DNA_SOURCE:-$SCRIPT_DIR/..}"
+
+# Dynamic project root detection
+# Priority: CLI argument → Crystal Palace (if available) → User's home/projects
+detect_project_root() {
+    # If Crystal Palace exists, use it as default
+    if [[ -d "/Volumes/FOUR-TB/root" ]]; then
+        echo "/Volumes/FOUR-TB/root"
+    else
+        # Portable mode: use ~/projects
+        local portable_root="$HOME/projects"
+        mkdir -p "$portable_root" 2>/dev/null || true
+        echo "$portable_root"
+    fi
+}
+
+CRYSTAL_PALACE_ROOT="$(detect_project_root)"
+
+# Show mode indicator
+show_mode_indicator() {
+    case "$COGSPACE_MODE" in
+        crystal-palace) echo -e "${CYAN}🏰 Crystal Palace Mode${NC} - Local infrastructure" ;;
+        portable)       echo -e "${CYAN}📱 Portable Mode${NC} - GitHub DNA: $COGSPACE_DNA_REPO" ;;
+        standalone)     echo -e "${YELLOW}⚠️ Standalone Mode${NC} - No DNA source available" ;;
+    esac
+}
+
+echo -e "${CYAN}🏛️ CRYSTAL PALACE PROJECT CREATION SYSTEM v${NEW_PROJECT_VERSION}${NC}"
+echo -e "${BLUE}Enhanced with COGSPACE Cognitive Workspace Serialization + AITCL${NC}"
+show_mode_indicator
+echo -e "${BLUE}Timestamp: ${TIMESTAMP}${NC}"
+echo -e "${BLUE}Project Root: ${CRYSTAL_PALACE_ROOT}${NC}"
+echo ""
+
+# Detect execution mode
+EXECUTION_MODE="interactive"
+if [[ -n "${AI_ASSISTANT:-}" ]] || [[ "${USER:-}" =~ ^(claude|bob|steve|eon|wizard)$ ]] || [[ "$#" -ge 3 ]]; then
+    EXECUTION_MODE="scriptable"
+fi
+
+echo -e "${MAGENTA}🔧 Execution Mode: ${EXECUTION_MODE}${NC}"
+
+# Project type templates (using arrays for compatibility)
+PROJECT_TYPE_NAMES=("ai-assistant" "web-app" "api-service" "cli-tool" "library" "dashboard" "infrastructure" "research" "generic")
+PROJECT_TYPE_DESCRIPTIONS=(
+    "AI Assistant Project with enhanced context preservation + AITCL templates"
+    "Web Application with frontend/backend structure + AITCL web-app template"  
+    "API Service with microservice architecture + AITCL basic template"
+    "Command Line Tool with utilities and scripts + AITCL basic template"
+    "Reusable Library/Package for Crystal Palace ecosystem + AITCL basic template"
+    "Dashboard/Analytics with data visualization + AITCL web-app template"
+    "Infrastructure/DevOps tooling and automation + AITCL basic template"
+    "Research/Analysis project with documentation focus + AITCL basic template"
+    "Generic project with standard Crystal Palace structure + AITCL basic template"
+)
+
+# Function: Display usage information
+show_usage() {
+    echo -e "${CYAN}USAGE MODES:${NC}"
+    echo ""
+    echo -e "${YELLOW}Interactive Mode (Human Developers):${NC}"
+    echo "  ./new-project"
+    echo "  # Guided project creation with prompts and validation"
+    echo ""
+    echo -e "${YELLOW}Scriptable Mode (AI/Automation):${NC}"
+    echo "  ./new-project <project_name> <project_owner> <primary_dev> [project_type] [description]"
+    echo ""
+    echo -e "${BLUE}Parameters:${NC}"
+    echo "  project_name    : Name of the new project (kebab-case recommended)"
+    echo "  project_owner   : Project owner (e.g., 'Howard Fried', 'Crystal Palace')"
+    echo "  primary_dev     : Primary developer (e.g., 'Howard Fried', 'Bob')"
+    echo "  project_type    : Optional project type (ai-assistant, web-app, api-service, etc.)"
+    echo "  description     : Optional project description"
+    echo ""
+    echo -e "${BLUE}Available Project Types:${NC}"
+    for i in "${!PROJECT_TYPE_NAMES[@]}"; do
+        echo "  ${PROJECT_TYPE_NAMES[$i]}: ${PROJECT_TYPE_DESCRIPTIONS[$i]}"
+    done
+    echo ""
+    echo -e "${CYAN}Features:${NC}"
+    echo "  ✅ COGSPACE Cognitive Workspace Serialization v${NEW_PROJECT_VERSION}"
+    echo "  ✅ 90%+ continuity effectiveness"
+    echo "  ✅ Portable Mode: Create projects anywhere with GitHub DNA"
+    echo "  ✅ Multi-environment compatibility (Crystal Palace / Portable / Standalone)"
+    echo "  ✅ Hardware failure protection"
+    echo "  ✅ Dynamic guidelines/lessons/notes system"
+    echo "  ✅ Push-based Crystal Palace Host sync (v35.1.0+)"
+    echo "  🚀 AITCL: AI Task Control Language integration"
+    echo "  📚 AITCL Templates: Project-specific documentation templates"
+    echo "  🤖 Dual-Audience Documentation: Human and AI collaboration standard"
+}
+
+# Function: Validate project name
+validate_project_name() {
+    local name="$1"
+    
+    # Check for valid characters (alphanumeric, hyphens, underscores)
+    if [[ ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo -e "${RED}❌ Invalid project name. Use only letters, numbers, hyphens, and underscores.${NC}"
+        return 1
+    fi
+    
+    # Check if project already exists
+    if [[ -d "$CRYSTAL_PALACE_ROOT/$name" ]]; then
+        echo -e "${RED}❌ Project already exists: $CRYSTAL_PALACE_ROOT/$name${NC}"
+        return 1
+    fi
+    
+    # Check length
+    if [[ ${#name} -lt 3 || ${#name} -gt 50 ]]; then
+        echo -e "${RED}❌ Project name must be between 3 and 50 characters.${NC}"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Function: Interactive project creation
+interactive_mode() {
+    echo -e "${CYAN}🎯 INTERACTIVE PROJECT CREATION${NC}"
+    echo -e "${BLUE}Creating a new Crystal Palace project with COGSPACE integration${NC}"
+    echo ""
+    
+    # Project name
+    while true; do
+        echo -e "${YELLOW}📝 Enter project name (kebab-case recommended):${NC}"
+        read -r PROJECT_NAME
+        if validate_project_name "$PROJECT_NAME"; then
+            echo -e "${GREEN}✅ Project name valid: $PROJECT_NAME${NC}"
+            break
+        fi
+    done
+    
+    # Project owner
+    echo ""
+    echo -e "${YELLOW}👤 Enter project owner (default: Crystal Palace):${NC}"
+    read -r PROJECT_OWNER
+    PROJECT_OWNER="${PROJECT_OWNER:-Crystal Palace}"
+    
+    # Primary developer
+    echo ""
+    echo -e "${YELLOW}👨‍💻 Enter primary developer (default: Howard Fried):${NC}"
+    read -r PRIMARY_DEV
+    PRIMARY_DEV="${PRIMARY_DEV:-Howard Fried}"
+    
+    # Project type selection
+    echo ""
+    echo -e "${CYAN}🏗️ Select project type:${NC}"
+    for i in "${!PROJECT_TYPE_NAMES[@]}"; do
+        local index=$((i + 1))
+        echo "  $index) ${PROJECT_TYPE_NAMES[$i]} - ${PROJECT_TYPE_DESCRIPTIONS[$i]}"
+    done
+    
+    echo ""
+    echo -e "${YELLOW}Enter selection (1-${#PROJECT_TYPE_NAMES[@]}, default: ${#PROJECT_TYPE_NAMES[@]} for generic):${NC}"
+    read -r SELECTION
+    SELECTION="${SELECTION:-${#PROJECT_TYPE_NAMES[@]}}"
+    
+    if [[ "$SELECTION" =~ ^[0-9]+$ ]] && [[ "$SELECTION" -ge 1 ]] && [[ "$SELECTION" -le "${#PROJECT_TYPE_NAMES[@]}" ]]; then
+        local selected_index=$((SELECTION - 1))
+        PROJECT_TYPE="${PROJECT_TYPE_NAMES[$selected_index]}"
+        echo -e "${GREEN}✅ Selected: $PROJECT_TYPE${NC}"
+    else
+        PROJECT_TYPE="generic"
+        echo -e "${YELLOW}⚠️ Invalid selection, using generic project type${NC}"
+    fi
+    
+    # Project description
+    echo ""
+    echo -e "${YELLOW}📄 Enter project description (optional):${NC}"
+    read -r PROJECT_DESCRIPTION
+    PROJECT_DESCRIPTION="${PROJECT_DESCRIPTION:-A Crystal Palace project with cognitive workspace serialization}"
+    
+    # Confirmation
+    echo ""
+    echo -e "${CYAN}📋 PROJECT CONFIGURATION SUMMARY:${NC}"
+    echo -e "${BLUE}  Name: $PROJECT_NAME${NC}"
+    echo -e "${BLUE}  Owner: $PROJECT_OWNER${NC}"
+    echo -e "${BLUE}  Developer: $PRIMARY_DEV${NC}"
+    echo -e "${BLUE}  Type: $PROJECT_TYPE${NC}"
+    echo -e "${BLUE}  Description: $PROJECT_DESCRIPTION${NC}"
+    echo -e "${BLUE}  Location: $CRYSTAL_PALACE_ROOT/$PROJECT_NAME${NC}"
+    echo ""
+    
+    echo -e "${YELLOW}🚀 Proceed with project creation? (Y/n):${NC}"
+    read -r CONFIRM
+    CONFIRM="${CONFIRM:-Y}"
+    
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}❌ Project creation cancelled${NC}"
+        exit 0
+    fi
+}
+
+# Function: Scriptable project creation
+scriptable_mode() {
+    echo -e "${CYAN}🤖 SCRIPTABLE PROJECT CREATION${NC}"
+    echo -e "${BLUE}AI/Automation mode with parameter validation${NC}"
+    echo ""
+    
+    # Validate parameter count
+    if [[ "$#" -lt 3 ]]; then
+        echo -e "${RED}❌ ERROR: Insufficient parameters for scriptable mode${NC}"
+        show_usage
+        exit 1
+    fi
+    
+    # Extract parameters
+    PROJECT_NAME="$1"
+    PROJECT_OWNER="$2"
+    PRIMARY_DEV="$3"
+    PROJECT_TYPE="${4:-generic}"
+    PROJECT_DESCRIPTION="${5:-A Crystal Palace project with cognitive workspace serialization}"
+    
+    # Validate project name
+    if ! validate_project_name "$PROJECT_NAME"; then
+        exit 1
+    fi
+    
+    # Validate project type
+    local valid_type=false
+    for type in "${PROJECT_TYPE_NAMES[@]}"; do
+        if [[ "$type" == "$PROJECT_TYPE" ]]; then
+            valid_type=true
+            break
+        fi
+    done
+    
+    if [[ "$valid_type" == false ]]; then
+        echo -e "${YELLOW}⚠️ Unknown project type '$PROJECT_TYPE', using 'generic'${NC}"
+        PROJECT_TYPE="generic"
+    fi
+    
+    echo -e "${GREEN}✅ Parameters validated${NC}"
+    echo -e "${BLUE}  Name: $PROJECT_NAME${NC}"
+    echo -e "${BLUE}  Owner: $PROJECT_OWNER${NC}"
+    echo -e "${BLUE}  Developer: $PRIMARY_DEV${NC}"
+    echo -e "${BLUE}  Type: $PROJECT_TYPE${NC}"
+    echo ""
+}
+
+# Function: Create project structure based on type
+# v40.2.1: Minimalist structure - only cogspace/ and session-management/
+# Project-specific directories should be created by the user as needed
+create_project_structure() {
+    local project_path="$CRYSTAL_PALACE_ROOT/$PROJECT_NAME"
+
+    echo -e "${CYAN}🏗️ CREATING PROJECT STRUCTURE${NC}"
+    echo -e "${BLUE}Path: $project_path${NC}"
+
+    # Create base directory
+    mkdir -p "$project_path"
+    cd "$project_path"
+
+    # v40.2.1: COGSPACE minimalist structure
+    # Only create the essential COGSPACE directories
+    # cogspace/ will be created by deploy_cogspace()
+    # session-management/ will be created by wake.sh on first run
+    # Project-specific directories (src/, tests/, etc.) should be created
+    # by the user when needed - not every project needs the same structure
+
+    # Create .claude directory for Claude Code integration
+    mkdir -p .claude
+
+    # v40.2.1: Initialize git repository - required for COGSPACE
+    git init --quiet
+    echo -e "${GREEN}✅ Git repository initialized${NC}"
+
+    echo -e "${GREEN}✅ Project structure created (minimalist v40.2.1)${NC}"
+}
+
+# Function: Generate project files
+generate_project_files() {
+    echo -e "${CYAN}📝 GENERATING PROJECT FILES${NC}"
+
+    # Pre-compute COGSPACE mode capitalized (POSIX-compatible for bash 3.2)
+    local COGSPACE_MODE_CAP
+    COGSPACE_MODE_CAP=$(echo "$COGSPACE_MODE" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+
+    # Pre-compute project structure based on type (POSIX-compatible for bash 3.2)
+    local PROJECT_STRUCTURE=""
+    case "$PROJECT_TYPE" in
+        "ai-assistant")
+            PROJECT_STRUCTURE="├── training-data/          # Training datasets and examples
+├── models/                 # AI model definitions
+├── conversations/          # Conversation logs and examples
+├── knowledge-base/         # Domain knowledge and documentation"
+            ;;
+        "web-app")
+            PROJECT_STRUCTURE="├── frontend/               # Frontend application code
+├── backend/                # Backend API and services
+├── database/               # Database schemas and migrations
+├── public/                 # Static assets and files
+├── assets/                 # Images, styles, and resources"
+            ;;
+        "api-service")
+            PROJECT_STRUCTURE="├── controllers/            # API request handlers
+├── models/                 # Data models and schemas
+├── middleware/             # Request/response middleware
+├── routes/                 # API route definitions
+├── utils/                  # Utility functions"
+            ;;
+        *)
+            PROJECT_STRUCTURE="├── src/                    # Source code
+├── tests/                  # Test files and test data
+├── docs/                   # Documentation and guides"
+            ;;
+    esac
+
+    # Create README.md
+    cat > "README.md" << EOF
+# ${PROJECT_NAME}
+
+**Project Owner:** ${PROJECT_OWNER}
+**Primary Developer:** ${PRIMARY_DEV}
+**Project Type:** ${PROJECT_TYPE}
+**Created:** ${TIMESTAMP}
+**COGSPACE Version:** ${NEW_PROJECT_VERSION}
+**AITCL Support:** Enabled
+**Mode:** ${COGSPACE_MODE_CAP}
+
+## Description
+
+${PROJECT_DESCRIPTION}
+
+## Features
+
+### Core Workspace Management
+- ✅ COGSPACE Cognitive Workspace Serialization v${NEW_PROJECT_VERSION}
+- ✅ 90%+ session continuity effectiveness
+- ✅ Portable Mode: Works anywhere with GitHub DNA
+- ✅ Multi-environment compatibility (VS Code, Cursor, Claude Code)
+- ✅ Hardware failure protection
+- ✅ Push-based Crystal Palace Host sync (v35.1.0+)
+
+### AI Collaboration
+- 🚀 AITCL: AI Task Control Language integration
+- 📚 AITCL Templates: Ready-to-use documentation templates
+- 🤖 Dual-Audience Documentation: Human and AI collaboration standard
+
+## Getting Started
+
+### Initialize Session Management
+\`\`\`bash
+# Start development session with cognitive restoration
+./session-wake-enhanced.sh
+
+# Save context during development (hardware failure protection)
+./session-save-enhanced.sh "Your progress update"
+
+# End session with complete cognitive preservation
+./session-sleep-enhanced.sh "Session summary"
+\`\`\`
+
+### Knowledge Management
+\`\`\`bash
+# Manage project guidelines
+./guidelines add "coding-standards" "Use TypeScript for new features"
+./guidelines list
+
+# Manage lessons learned
+./lessons add "performance-tip" "Cache API responses for 5min"
+./lessons list
+
+# Add developer notes
+./note "${PRIMARY_DEV}" "Database schema needs normalization"
+\`\`\`
+
+### Project Structure
+
+\`\`\`
+${PROJECT_NAME}/
+${PROJECT_STRUCTURE}
+├── scripts/                # Build and utility scripts
+├── config/                 # Configuration files
+├── session-management/     # COGSPACE cognitive context
+├── README.md              # This file
+└── cognitive-workspace-version.json  # Version control
+\`\`\`
+
+## COGSPACE Integration
+
+This project includes the revolutionary COGSPACE Cognitive Workspace Serialization System:
+
+### Session Management Commands
+- **session-wake-enhanced.sh** - Start with full cognitive restoration
+- **session-save-enhanced.sh** - Continuous context preservation  
+- **session-sleep-enhanced.sh** - Complete workspace preservation
+
+### Continuity Features
+- **90%+ Effectiveness** - Revolutionary improvement from 15% baseline
+- **Hardware Failure Protection** - Never lose work context
+- **Cross-Platform Support** - Works in any development environment
+- **Executable Continuity** - Immediate action script generation
+
+## Development Guidelines
+
+### Code Standards
+- Use consistent coding style across all files
+- Document all public APIs and interfaces
+- Write tests for critical functionality
+- Follow Crystal Palace development patterns
+
+### Session Management Best Practices
+- Use enhanced session-save frequently during long development sessions
+- Always use session-sleep when ending work to preserve complete context
+- Leverage guidelines/lessons/notes system for knowledge management
+- Take advantage of 90% continuity effectiveness for seamless work resumption
+
+---
+
+**Created with Crystal Palace Project Creation System v${NEW_PROJECT_VERSION}**  
+**COGSPACE Cognitive Workspace Serialization: ACTIVE**
+EOF
+    
+    # Create .gitignore
+    cat > ".gitignore" << 'EOF'
+# Dependencies
+node_modules/
+*.log
+npm-debug.log*
+
+# Build outputs  
+dist/
+build/
+*.tgz
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Session management temporary files (preserve context)
+session-management/cognitive-context/backups/
+quick-restore-*.sh
+next-immediate-action-*.sh
+permission-normalization-report.json
+
+# Keep COGSPACE cognitive context for continuity
+!session-management/cognitive-context/
+EOF
+    
+    # Create project metadata
+    cat > ".project-metadata.json" << EOF
+{
+  "projectMetadata": {
+    "name": "$PROJECT_NAME",
+    "owner": "$PROJECT_OWNER",
+    "primaryDeveloper": "$PRIMARY_DEV",
+    "projectType": "$PROJECT_TYPE",
+    "description": "$PROJECT_DESCRIPTION",
+    "created": "$TIMESTAMP",
+    "createdBy": "Crystal Palace Project Creation System v$NEW_PROJECT_VERSION"
+  },
+  "cogspaceIntegration": {
+    "version": "$NEW_PROJECT_VERSION",
+    "mode": "$COGSPACE_MODE",
+    "dnaSource": "${DNA_SOURCE:-standalone}",
+    "features": {
+      "cognitiveWorkspaceSerialization": true,
+      "continuityEffectiveness": "90%+",
+      "portableMode": true,
+      "pushBasedSync": true,
+      "githubDNA": "howeirdo/cogspace-remote-dna",
+      "hardwareFailureProtection": true,
+      "multiEnvironmentSupport": true
+    },
+    "deploymentStatus": "integrated"
+  },
+  "crystalPalaceEcosystem": {
+    "member": true,
+    "location": "$CRYSTAL_PALACE_ROOT/$PROJECT_NAME",
+    "sessionManagement": "cogspace-enhanced",
+    "continuityTarget": "90%+"
+  }
+}
+EOF
+
+    # v55.0.0: Generate .claude/CLAUDE.md for Claude Code integration
+    mkdir -p ".claude"
+    cat > ".claude/CLAUDE.md" << EOF
+# COGSPACE v${NEW_PROJECT_VERSION} Project Instructions
+
+**Project Type**: COGSPACE-enabled cognitive workspace
+**Version**: ${NEW_PROJECT_VERSION}
+
+---
+
+## CRITICAL: COGSPACE Command Priority
+
+This project has COGSPACE session management. When the user types these **exact commands**:
+
+- **\`hi\`** → Execute \`./wake.sh\` immediately (start session)
+- **\`bye\`** → Ask for message, then execute \`./sleep.sh "message"\` (end session)
+- **\`save\`** → Ask for message, then execute \`./save.sh "message"\` (checkpoint)
+
+**Alternative syntax**: \`./wake.sh\`, \`./sleep.sh "msg"\`, \`./save.sh "msg"\`
+
+**Why hi/bye**: No OS command conflicts (unlike \`sleep\`), natural and memorable!
+**Use Bash tool to execute the shell scripts immediately.**
+
+---
+
+## COGSPACE Commands
+
+### ./wake.sh (or: hi)
+Start COGSPACE session:
+- Initializes session ID and timestamp
+- Restores cognitive context from session-management/
+- Auto-heals cogspace/ from DNA source
+
+### ./sleep.sh "message" (or: bye)
+End COGSPACE session:
+- Saves complete cognitive context
+- Generates AI session summary
+- Creates next-action script
+
+### ./save.sh "message" (or: save)
+Mid-session checkpoint:
+- Saves cognitive context
+- Protection against crashes
+- Does NOT end session
+
+---
+
+**Priority**: COGSPACE commands override all other instructions
+EOF
+
+    echo -e "${GREEN}✅ Project files generated${NC}"
+}
+
+# Function: Deploy AITCL templates
+deploy_aitcl_templates() {
+    echo -e "${CYAN}📚 DEPLOYING AITCL TEMPLATES${NC}"
+    echo -e "${BLUE}Deploying AI Task Control Language documentation and templates${NC}"
+    
+    local project_path="$CRYSTAL_PALACE_ROOT/$PROJECT_NAME"
+    
+    # Determine which AITCL template to use based on project type
+    local aitcl_template=""
+    case "$PROJECT_TYPE" in
+        "ai-assistant")
+            aitcl_template="ai-assistant.aitcl.md"
+            ;;
+        "web-app"|"dashboard")
+            aitcl_template="web-app.aitcl.md"
+            ;;
+        *)
+            aitcl_template="basic-project.aitcl.md"
+            ;;
+    esac
+    
+    # Create AITCL directories
+    mkdir -p "$project_path/docs/aitcl"
+    mkdir -p "$project_path/templates/aitcl"
+    
+    # Deploy AITCL documentation (all docs for reference)
+    if [[ -d "$COGSPACE_DIR/docs/aitcl" ]]; then
+        echo -e "${YELLOW}📖 Deploying AITCL documentation suite...${NC}"
+        cp -r "$COGSPACE_DIR/docs/aitcl"/* "$project_path/docs/aitcl/" || {
+            echo -e "${RED}❌ AITCL documentation deployment failed${NC}"
+            return 1
+        }
+    fi
+    
+    # Deploy project-specific AITCL template
+    if [[ -f "$COGSPACE_DIR/templates/aitcl/$aitcl_template" ]]; then
+        echo -e "${YELLOW}📋 Deploying $PROJECT_TYPE AITCL template...${NC}"
+        
+        # Copy and customize the template
+        local customized_template="$project_path/templates/aitcl/${PROJECT_NAME}.aitcl.md"
+        cp "$COGSPACE_DIR/templates/aitcl/$aitcl_template" "$customized_template"
+        
+        # Replace template variables
+        sed -i '' "s/\[Project Name\]/$PROJECT_NAME/g" "$customized_template"
+        sed -i '' "s/\[project-name\]/$PROJECT_NAME/g" "$customized_template"
+        sed -i '' "s/\[DATE\]/$TIMESTAMP/g" "$customized_template"
+        sed -i '' "s/\[OWNER NAME\]/$PROJECT_OWNER/g" "$customized_template"
+        sed -i '' "s/\[DEVELOPER NAME\]/$PRIMARY_DEV/g" "$customized_template"
+        sed -i '' "s/\[SESSION-ID\]/$(date +%s)-$(openssl rand -hex 4)/g" "$customized_template"
+        
+        echo -e "${GREEN}✅ AITCL template customized: ${customized_template}${NC}"
+    else
+        echo -e "${YELLOW}⚠️  AITCL template not found: $aitcl_template, using basic template${NC}"
+        # Fallback to basic template
+        if [[ -f "$COGSPACE_DIR/templates/aitcl/basic-project.aitcl.md" ]]; then
+            cp "$COGSPACE_DIR/templates/aitcl/basic-project.aitcl.md" "$project_path/templates/aitcl/${PROJECT_NAME}.aitcl.md"
+        fi
+    fi
+    
+    echo -e "${GREEN}✅ AITCL templates deployed successfully${NC}"
+}
+
+# Function: Deploy COGSPACE integration
+deploy_cogspace_integration() {
+    echo -e "${CYAN}🚀 DEPLOYING COGSPACE INTEGRATION${NC}"
+    echo -e "${BLUE}Integrating Cognitive Workspace Serialization v${NEW_PROJECT_VERSION}${NC}"
+    show_mode_indicator
+
+    local project_path="$CRYSTAL_PALACE_ROOT/$PROJECT_NAME"
+
+    # Check if DNA source is available
+    if [[ -z "$DNA_SOURCE" ]]; then
+        echo -e "${RED}❌ No DNA source available - cannot deploy COGSPACE${NC}"
+        echo -e "${YELLOW}Please ensure GitHub CLI is installed and authenticated:${NC}"
+        echo -e "${CYAN}  brew install gh && gh auth login${NC}"
+        exit 1
+    fi
+
+    # Try deployment scripts in order of preference
+    local deployment_scripts=(
+        "$DNA_SOURCE/src/deploy-cogspace.sh"
+        "$DNA_SOURCE/deploy-cogspace.sh"
+        "$DNA_SOURCE/deploy-v16-single.sh"
+    )
+
+    local deployed=false
+    for script in "${deployment_scripts[@]}"; do
+        if [[ -f "$script" ]]; then
+            echo -e "${YELLOW}🔧 Running deployment: $(basename "$script")...${NC}"
+            "$script" "$project_path" && deployed=true && break
+        fi
+    done
+
+    if [[ "$deployed" == false ]]; then
+        echo -e "${YELLOW}⚠️ No deployment script found, using direct copy...${NC}"
+        # Direct copy fallback - v40.2.1 minimalist structure
+        if [[ -d "$DNA_SOURCE/cogspace" ]]; then
+            cp -r "$DNA_SOURCE/cogspace" "$project_path/"
+            # v40.2.1: Don't copy src/ directory - not needed for projects
+            # cp -r "$DNA_SOURCE/src" "$project_path/" 2>/dev/null || true
+
+            # Create symlinks
+            cd "$project_path"
+            ln -sf cogspace/core/session-wake.sh wake.sh
+            ln -sf cogspace/core/session-sleep.sh sleep.sh
+            ln -sf cogspace/core/session-save.sh save.sh
+            ln -sf cogspace/core/session-wake.sh hi
+            ln -sf cogspace/core/session-sleep.sh bye
+            ln -sf cogspace/core/session-save.sh save
+
+            # v40.2.1: Don't copy .version file - use cogspace/cogspace-version.json
+            # cp "$DNA_SOURCE/.version" "$project_path/" 2>/dev/null || echo "35.2.0" > "$project_path/.version"
+
+            echo -e "${GREEN}✅ Direct copy deployment complete${NC}"
+            deployed=true
+        fi
+    fi
+
+    if [[ "$deployed" == false ]]; then
+        echo -e "${RED}❌ Deployment failed - no cogspace directory in DNA source${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✅ COGSPACE v${NEW_PROJECT_VERSION} deployment complete (${COGSPACE_MODE} mode)${NC}"
+}
+
+# Function: Validate project creation
+validate_project_creation() {
+    echo -e "${CYAN}🔍 VALIDATING PROJECT CREATION${NC}"
+    
+    local project_path="$CRYSTAL_PALACE_ROOT/$PROJECT_NAME"
+    local validation_errors=0
+    
+    # v40.2.1: Check minimalist essential files only
+    # AITCL and extra docs are optional, not required
+    local essential_files=(
+        "README.md"
+        ".gitignore"
+        ".claude/CLAUDE.md"
+        "cogspace/cogspace-version.json"
+        "wake.sh"
+        "save.sh"
+        "sleep.sh"
+        "hi"
+        "bye"
+        "save"
+    )
+    
+    for file in "${essential_files[@]}"; do
+        if [[ -f "$project_path/$file" ]]; then
+            echo -e "${GREEN}✅ $file${NC}"
+        else
+            echo -e "${RED}❌ $file${NC}"
+            ((validation_errors++))
+        fi
+    done
+    
+    # v40.2.1: Check symlinks (hi, bye, save should be symlinks)
+    local symlinks=("hi" "bye" "save")
+    for link in "${symlinks[@]}"; do
+        if [[ -L "$project_path/$link" ]]; then
+            echo -e "${GREEN}✅ $link (symlink)${NC}"
+        else
+            echo -e "${YELLOW}⚠️ $link (not a symlink)${NC}"
+        fi
+    done
+
+    # Check COGSPACE functionality
+    cd "$project_path"
+    if ./wake.sh > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ COGSPACE v${NEW_PROJECT_VERSION} functionality operational${NC}"
+    else
+        echo -e "${RED}❌ COGSPACE v${NEW_PROJECT_VERSION} functionality check failed${NC}"
+        ((validation_errors++))
+    fi
+    
+    # Generate validation report
+    local validation_status="SUCCESS"
+    if [[ $validation_errors -gt 0 ]]; then
+        validation_status="FAILED"
+    fi
+    
+    local validation_report=$(cat << EOF
+{
+  "projectCreation": {
+    "timestamp": "$TIMESTAMP",
+    "projectName": "$PROJECT_NAME",
+    "status": "$validation_status",
+    "validationErrors": $validation_errors
+  },
+  "cogspaceIntegration": {
+    "deployed": true,
+    "functional": $(if [[ $validation_errors -eq 0 ]]; then echo "true"; else echo "false"; fi),
+    "continuityTarget": "90%+"
+  },
+  "readyForDevelopment": $(if [[ $validation_errors -eq 0 ]]; then echo "true"; else echo "false"; fi)
+}
+EOF
+)
+    
+    # v40.2.1: Don't create validation JSON file - minimalist structure
+    # echo "$validation_report" > "$project_path/project-creation-validation.json"
+    # chmod 644 "$project_path/project-creation-validation.json"
+    
+    if [[ $validation_errors -eq 0 ]]; then
+        echo -e "${GREEN}✅ PROJECT VALIDATION COMPLETE${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ PROJECT VALIDATION FAILED ($validation_errors errors)${NC}"
+        return 1
+    fi
+}
+
+# Main execution flow
+main() {
+    # Show usage if requested
+    if [[ "${1:-}" =~ ^(-h|--help|help)$ ]]; then
+        show_usage
+        exit 0
+    fi
+    
+    # Execute based on mode
+    if [[ "$EXECUTION_MODE" == "interactive" ]]; then
+        interactive_mode
+    else
+        scriptable_mode "$@"
+    fi
+    
+    # Create the project
+    echo ""
+    echo -e "${MAGENTA}🚀 BEGINNING PROJECT CREATION SEQUENCE${NC}"
+    
+    create_project_structure
+    generate_project_files
+    # v40.2.1: AITCL templates disabled - minimalist structure
+    # AITCL can be added manually if needed: ./cogspace/commands/add-aitcl
+    # deploy_aitcl_templates
+    deploy_cogspace_integration
+    
+    echo ""
+    if validate_project_creation; then
+        echo ""
+        echo -e "${GREEN}✅ PROJECT CREATION COMPLETE${NC}"
+        echo -e "${CYAN}🏛️ CRYSTAL PALACE PROJECT: $PROJECT_NAME${NC}"
+        echo ""
+        echo -e "${BLUE}📍 Location: $CRYSTAL_PALACE_ROOT/$PROJECT_NAME${NC}"
+        echo -e "${BLUE}🧠 COGSPACE Version: ${NEW_PROJECT_VERSION} - Portable Mode${NC}"
+        show_mode_indicator
+        echo -e "${BLUE}🎯 Continuity Effectiveness: 90%+${NC}"
+        echo ""
+        echo -e "${YELLOW}🚀 IMMEDIATE NEXT STEPS:${NC}"
+        echo -e "${CYAN}  1. cd $CRYSTAL_PALACE_ROOT/$PROJECT_NAME${NC}"
+        echo -e "${CYAN}  2. ./wake.sh  (or just: hi)${NC}"
+        echo -e "${CYAN}  3. Begin development with revolutionary context preservation${NC}"
+        echo ""
+        echo -e "${MAGENTA}🎯 COGNITIVE WORKSPACE SERIALIZATION: ACTIVE${NC}"
+        echo -e "${BLUE}🌐 DNA Source: ${DNA_SOURCE:-standalone}${NC}"
+    else
+        echo ""
+        echo -e "${RED}❌ PROJECT CREATION FAILED${NC}"
+        echo -e "${YELLOW}Check validation report for details${NC}"
+        exit 1
+    fi
+}
+
+# Run main function with all arguments
+main "$@"

@@ -1,0 +1,123 @@
+#!/bin/bash
+# COGSPACE v55.0.0 - Developer Notes
+# Manage timestamped notes for the current session
+# v51.6.0: Fixed multi-line content handling via JSON encoding
+# v55.0.0: Fixed symlink resolution for PROJECT_ROOT calculation
+
+# Resolve symlink before calculating PROJECT_ROOT
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ -L "$SCRIPT_PATH" ]]; then
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+fi
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+# Read version dynamically - NEVER hardcode!
+VERSION=$(jq -r '.version // "unknown"' "$PROJECT_ROOT/cogspace/cogspace-version.json" 2>/dev/null || echo "unknown")
+
+# Get developer name
+DEV_NAME="${USER:-wizard}"
+
+case "$1" in
+    "list")
+        echo "COGSPACE v$VERSION - Developer Notes"
+        echo ""
+        echo "📝 Notes in cogspace/output/notes/:"
+        echo ""
+        if [[ -d "$PROJECT_ROOT/cogspace/output/notes" ]]; then
+            ls -la "$PROJECT_ROOT/cogspace/output/notes/" 2>/dev/null | grep -v "^total" | grep -v "^d" || echo "  (no notes found)"
+        else
+            echo "  (notes directory not found)"
+        fi
+        ;;
+    "add")
+        shift
+        if [[ -z "$1" ]]; then
+            echo "Usage: note add <message>"
+            echo ""
+            echo "Example: note add 'Fixed the authentication bug'"
+            echo "Example: note add \"Multi-line"
+            echo "  note content\""
+            exit 1
+        fi
+        NOTE_MESSAGE="$*"
+
+        # v51.6.0: Use JSON encoding to safely pass multi-line content
+        # This fixes the JavaScript syntax error with newlines and special characters
+        if command -v jq &>/dev/null; then
+            # Create JSON payload with proper escaping via jq
+            JSON_PAYLOAD=$(jq -n \
+                --arg dev "$DEV_NAME" \
+                --arg content "$NOTE_MESSAGE" \
+                '{developer: $dev, content: $content}')
+
+            # Pass JSON via stdin to Node script
+            echo "$JSON_PAYLOAD" | node -e "
+const s = require('./cogspace/analyzers/serializer.cjs');
+let data = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => data += chunk);
+process.stdin.on('end', async () => {
+    try {
+        const parsed = JSON.parse(data);
+        await new s().addDeveloperNote(parsed.developer, parsed.content);
+    } catch (e) {
+        console.error('Error adding note:', e.message);
+        process.exit(1);
+    }
+});
+"
+        else
+            # Fallback: Write to temp file (works without jq)
+            TEMP_FILE=$(mktemp)
+            echo "$NOTE_MESSAGE" > "$TEMP_FILE"
+
+            node -e "
+const s = require('./cogspace/analyzers/serializer.cjs');
+const fs = require('fs');
+(async () => {
+    try {
+        const content = fs.readFileSync('$TEMP_FILE', 'utf8');
+        await new s().addDeveloperNote('$DEV_NAME', content);
+    } catch (e) {
+        console.error('Error adding note:', e.message);
+        process.exit(1);
+    }
+})();
+"
+            rm -f "$TEMP_FILE"
+        fi
+
+        echo "✅ Note added by $DEV_NAME: $(echo "$NOTE_MESSAGE" | head -c 100)$([ ${#NOTE_MESSAGE} -gt 100 ] && echo "...")"
+        ;;
+    "help"|"--help"|"-h")
+        echo "COGSPACE v$VERSION - Developer Notes"
+        echo ""
+        echo "Usage: note [command] [options]"
+        echo ""
+        echo "Commands:"
+        echo "  list              List all notes in current project"
+        echo "  add <message>     Add a timestamped note (uses \$USER: $DEV_NAME)"
+        echo "  help              Show this help message"
+        echo ""
+        echo "Examples:"
+        echo "  note add 'Fixed authentication bug'"
+        echo "  note add 'TODO: refactor database layer'"
+        echo "  note add \"Multi-line note"
+        echo "    with special characters like 'quotes'\""
+        echo "  note list"
+        ;;
+    *)
+        echo "COGSPACE v$VERSION - Developer Notes"
+        echo ""
+        echo "Usage: note [command] [options]"
+        echo ""
+        echo "Commands:"
+        echo "  list              List all notes in current project"
+        echo "  add <message>     Add a timestamped note (uses \$USER: $DEV_NAME)"
+        echo "  help              Show this help message"
+        ;;
+esac

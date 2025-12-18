@@ -1,0 +1,9 @@
+#!/bin/bash
+# COGSPACE v40.0.0
+# Quick note creation
+if [[ -z "$1" ]] || [[ -z "$2" ]]; then
+    echo "Usage: note [developer-name] [note-content]"
+    exit 1
+fi
+node -e "const s=require('./cogspace/cognitive-serializer.cjs'); (async()=>console.log(await new s().addDeveloperNote('$1','$2')))()"
+

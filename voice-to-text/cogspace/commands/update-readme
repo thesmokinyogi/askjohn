@@ -1,0 +1,183 @@
+#!/bin/bash
+# COGSPACE v55.0.0 - Living Documentation System
+# Dynamically updates README.md with current project status
+# v55.0.0: Fixed symlink resolution for PROJECT_ROOT calculation
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Resolve symlink before calculating PROJECT_ROOT
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ -L "$SCRIPT_PATH" ]]; then
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+fi
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+README_FILE="$PROJECT_ROOT/README.md"
+
+# Read version dynamically - NEVER hardcode!
+VERSION=$(jq -r '.version // "unknown"' "$PROJECT_ROOT/cogspace/cogspace-version.json" 2>/dev/null || echo "unknown")
+
+show_help() {
+    echo "COGSPACE v$VERSION - Living Documentation System"
+    echo ""
+    echo "Usage: update-readme [command]"
+    echo ""
+    echo "Commands:"
+    echo "  update              Update README.md with project status (default)"
+    echo "  status              Show current project statistics"
+    echo "  help                Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  update-readme"
+    echo "  update-readme update"
+    echo "  update-readme status"
+    echo ""
+    echo "Target: $README_FILE"
+}
+
+get_stats() {
+    # Read current COGSPACE version
+    COGSPACE_VERSION="39.0.0"
+    if [[ -f "$PROJECT_ROOT/cogspace/cogspace-version.json" ]] && command -v jq &> /dev/null; then
+        COGSPACE_VERSION=$(jq -r '.version' "$PROJECT_ROOT/cogspace/cogspace-version.json" 2>/dev/null || echo "39.0.0")
+    fi
+
+    # Count achievements from latest context
+    ACHIEVEMENTS_COUNT=0
+    LATEST_CONTEXT=$(ls -t "$PROJECT_ROOT"/session-management/cognitive-context/complete-context-*.json 2>/dev/null | head -1)
+    if [[ -n "$LATEST_CONTEXT" ]] && command -v jq &> /dev/null; then
+        ACHIEVEMENTS_COUNT=$(jq '.serializedComponents.workNarrative.achievements | length' "$LATEST_CONTEXT" 2>/dev/null || echo "0")
+    fi
+
+    # Count files by type (check cogspace/src and src for code)
+    CODE_FILES=0
+    if [[ -d "$PROJECT_ROOT/cogspace/src" ]]; then
+        CODE_FILES=$((CODE_FILES + $(find "$PROJECT_ROOT/cogspace/src" -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.sh" -o -name "*.cjs" \) 2>/dev/null | wc -l | tr -d ' ')))
+    fi
+    if [[ -d "$PROJECT_ROOT/src" ]]; then
+        CODE_FILES=$((CODE_FILES + $(find "$PROJECT_ROOT/src" -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.sh" -o -name "*.cjs" \) 2>/dev/null | wc -l | tr -d ' ')))
+    fi
+
+    DOC_FILES=$(find "$PROJECT_ROOT/docs" -type f -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+    TEST_FILES=$(find "$PROJECT_ROOT/tests" -type f 2>/dev/null | wc -l | tr -d ' ')
+}
+
+show_status() {
+    get_stats
+
+    echo -e "${CYAN}📊 Project Status: $PROJECT_NAME${NC}"
+    echo ""
+    echo -e "${BLUE}   COGSPACE Version:    v$COGSPACE_VERSION${NC}"
+    echo -e "${BLUE}   Session Achievements: $ACHIEVEMENTS_COUNT${NC}"
+    echo -e "${BLUE}   Code Files:          $CODE_FILES${NC}"
+    echo -e "${BLUE}   Documentation Files: $DOC_FILES${NC}"
+    echo -e "${BLUE}   Test Files:          $TEST_FILES${NC}"
+}
+
+update_readme() {
+    echo -e "${CYAN}📝 COGSPACE Living Documentation System v$VERSION${NC}"
+    echo ""
+
+    # Check if README exists
+    if [[ ! -f "$README_FILE" ]]; then
+        echo -e "${YELLOW}⚠️  README.md not found at: $README_FILE${NC}"
+        exit 1
+    fi
+
+    get_stats
+
+    echo -e "${BLUE}🔍 Analyzing project state...${NC}"
+    echo -e "${GREEN}✅ Analysis complete${NC}"
+    echo -e "${BLUE}   Project: $PROJECT_NAME${NC}"
+    echo -e "${BLUE}   Version: v$COGSPACE_VERSION${NC}"
+    echo -e "${BLUE}   Recent achievements: $ACHIEVEMENTS_COUNT${NC}"
+    echo -e "${BLUE}   Code files: $CODE_FILES${NC}"
+    echo -e "${BLUE}   Documentation: $DOC_FILES${NC}"
+    echo -e "${BLUE}   Tests: $TEST_FILES${NC}"
+    echo ""
+
+    # Update COGSPACE Version line if it exists
+    if grep -q "^\*\*COGSPACE Version:\*\*" "$README_FILE"; then
+        sed -i '' "s/^\*\*COGSPACE Version:\*\*.*/\*\*COGSPACE Version:\*\* ${COGSPACE_VERSION}/" "$README_FILE"
+        echo -e "${GREEN}✅ Updated COGSPACE version to v${COGSPACE_VERSION}${NC}"
+    fi
+
+    # Add Project Status section if it doesn't exist
+    if ! grep -q "## Project Status" "$README_FILE"; then
+        # Find the line after Description section
+        awk -v version="$COGSPACE_VERSION" -v achievements="$ACHIEVEMENTS_COUNT" -v code="$CODE_FILES" -v docs="$DOC_FILES" -v tests="$TEST_FILES" '
+        /^## Description/ {
+            print
+            getline
+            print
+            getline
+            print
+            print ""
+            print "## Project Status"
+            print ""
+            print "**Last Updated:** " strftime("%Y-%m-%d %H:%M:%S")
+            print ""
+            print "- **COGSPACE Version:** v" version
+            print "- **Recent Session Achievements:** " achievements
+            print "- **Code Files:** " code
+            print "- **Documentation Files:** " docs
+            print "- **Test Files:** " tests
+            print ""
+            next
+        }
+        { print }
+        ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+
+        echo -e "${GREEN}✅ Added Project Status section${NC}"
+    else
+        # Update existing Project Status section
+        awk -v version="$COGSPACE_VERSION" -v achievements="$ACHIEVEMENTS_COUNT" -v code="$CODE_FILES" -v docs="$DOC_FILES" -v tests="$TEST_FILES" '
+        /^## Project Status/ {
+            print
+            print ""
+            print "**Last Updated:** " strftime("%Y-%m-%d %H:%M:%S")
+            print ""
+            print "- **COGSPACE Version:** v" version
+            print "- **Recent Session Achievements:** " achievements
+            print "- **Code Files:** " code
+            print "- **Documentation Files:** " docs
+            print "- **Test Files:** " tests
+            # Skip old status section content until next ## header
+            while (getline > 0 && !/^##/) { }
+            if (/^##/) print ""
+        }
+        !/^## Project Status/ { print }
+        ' "$README_FILE" > "$README_FILE.tmp" && mv "$README_FILE.tmp" "$README_FILE"
+
+        echo -e "${GREEN}✅ Updated Project Status section${NC}"
+    fi
+
+    echo ""
+    echo -e "${GREEN}✅ README.md updated successfully${NC}"
+    echo -e "${CYAN}📄 Location: $README_FILE${NC}"
+}
+
+case "$1" in
+    "help"|"--help"|"-h")
+        show_help
+        ;;
+    "status")
+        show_status
+        ;;
+    "update"|"")
+        update_readme
+        ;;
+    *)
+        show_help
+        ;;
+esac

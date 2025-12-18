@@ -1,0 +1,170 @@
+#!/bin/bash
+# COGSPACE v55.0.0 - Trouble Reporting
+# Create trouble reports for issue tracking
+# v55.0.0: Fixed symlink resolution for PROJECT_ROOT calculation
+
+# Resolve symlink before calculating PROJECT_ROOT
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+if [[ -L "$SCRIPT_PATH" ]]; then
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        SCRIPT_PATH="$(dirname "${BASH_SOURCE[0]}")/$SCRIPT_PATH"
+    fi
+fi
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/../.." && pwd)"
+PROJECT_NAME=$(basename "$PROJECT_ROOT")
+
+# Read version dynamically - NEVER hardcode!
+VERSION=$(jq -r '.version // "unknown"' "$PROJECT_ROOT/cogspace/cogspace-version.json" 2>/dev/null || echo "unknown")
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Portable path detection: Crystal Palace or local
+# Crystal Palace mode: use centralized trouble report system
+# Portable mode: save to local cogspace/output/trouble-reports/
+if [[ -d "/Volumes/FOUR-TB/crystal-palace/trouble-report-system" ]]; then
+    TROUBLE_SYSTEM="/Volumes/FOUR-TB/crystal-palace/trouble-report-system/inbox/incoming"
+    MODE="Crystal Palace"
+else
+    # Portable mode - save locally in cogspace/output/
+    TROUBLE_SYSTEM="$PROJECT_ROOT/cogspace/output/trouble-reports"
+    MODE="Portable"
+fi
+mkdir -p "$TROUBLE_SYSTEM" 2>/dev/null
+
+show_help() {
+    echo "COGSPACE v$VERSION - Trouble Reporting"
+    echo ""
+    echo "Usage: trouble-report [command]"
+    echo ""
+    echo "Commands:"
+    echo "  create              Create a new trouble report (default)"
+    echo "  list                List existing trouble reports"
+    echo "  help                Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  trouble-report"
+    echo "  trouble-report create"
+    echo "  trouble-report list"
+    echo ""
+    echo "Mode: $MODE"
+    echo "Output: $TROUBLE_SYSTEM"
+}
+
+list_reports() {
+    echo -e "${RED}🚨 Trouble Reports for $PROJECT_NAME${NC}"
+    echo -e "${CYAN}Mode: $MODE${NC}"
+    echo ""
+    if [[ -d "$TROUBLE_SYSTEM" ]]; then
+        count=$(ls "$TROUBLE_SYSTEM/"*.md 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$count" -gt 0 ]]; then
+            ls -la "$TROUBLE_SYSTEM/"*.md 2>/dev/null
+        else
+            echo "  (no reports found)"
+        fi
+    else
+        echo "  (reports directory not found)"
+    fi
+}
+
+create_report() {
+    CURRENT_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    REPORT_ID="${PROJECT_NAME}-$(date +'%Y%m%d-%H%M%S')-$(printf "%04d" $((RANDOM % 10000)))"
+    TROUBLE_REPORT="$TROUBLE_SYSTEM/trouble-report-${REPORT_ID}.md"
+
+    echo -e "${RED}🚨 COGSPACE Trouble Reporting${NC}"
+    echo -e "${CYAN}Project: $PROJECT_NAME | Mode: $MODE${NC}"
+    echo ""
+
+    cat > "$TROUBLE_REPORT" << TEMPLATE
+# Trouble Report
+
+**Report ID:** ${REPORT_ID}
+**Date Submitted:** ${CURRENT_TIME}
+**Project:** ${PROJECT_NAME}
+**Folder:** ${PROJECT_ROOT}
+**Reporter:** $(whoami)
+**Priority:** [LOW/MEDIUM/HIGH/CRITICAL]
+**Category:** [BUG/DEPLOYMENT/INTEGRATION/PERFORMANCE/SECURITY/OTHER]
+
+## 🚨 **Issue Description**
+
+### **What's happening?**
+[Clear description of the problem - be specific about what you're seeing]
+
+### **What should be happening?**
+[Expected behavior - what you expected to see]
+
+### **When did this start?**
+[Timeline of when issue began - was it working before?]
+
+## 🔍 **Technical Details**
+
+### **Environment**
+- **Project:** ${PROJECT_NAME}
+- **Folder:** ${PROJECT_ROOT}
+- **System:** $(uname -s) $(uname -m)
+- **Dependencies:** [Relevant dependencies and versions]
+
+### **Error Messages**
+\`\`\`
+[Paste complete error messages here - include stack traces if available]
+\`\`\`
+
+### **Steps to Reproduce**
+1. [Step 1 - be specific]
+2. [Step 2 - be specific]
+3. [Step 3 - be specific]
+
+### **What I've tried**
+- [ ] [Attempt 1 - what you tried and what happened]
+- [ ] [Attempt 2 - what you tried and what happened]
+
+## 📊 **Impact Assessment**
+
+### **Severity**
+- **User Impact:** [How many users affected - 0, 1, 10, 100, 1000+]
+- **Business Impact:** [none, minor, major, critical]
+- **Timeline:** [can wait, needs attention, blocking work, emergency]
+
+### **Affected Components**
+- [ ] Frontend
+- [ ] Backend
+- [ ] Database
+- [ ] API
+- [ ] Deployment
+- [ ] Other: [Specify]
+
+---
+
+**Tags:** [bug, issue, trouble]
+TEMPLATE
+
+    echo -e "${GREEN}✅ Trouble report created:${NC}"
+    echo -e "${YELLOW}$TROUBLE_REPORT${NC}"
+    echo ""
+    echo -e "${BLUE}📝 Next Steps:${NC}"
+    echo "1. Edit the report with your issue details"
+    echo "2. Save the file"
+}
+
+case "$1" in
+    "help"|"--help"|"-h")
+        show_help
+        ;;
+    "list")
+        list_reports
+        ;;
+    "create"|"")
+        create_report
+        ;;
+    *)
+        show_help
+        ;;
+esac

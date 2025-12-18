@@ -1,0 +1,109 @@
+# ============================================================================
+# COGSPACE v51.1.0 Configuration Defaults
+# ============================================================================
+# This file contains default configuration values for COGSPACE.
+# Copy to PROJECT_ROOT/.cogspace/config to customize per-project.
+#
+# All variables are prefixed with COGSPACE_ to avoid conflicts.
+# ============================================================================
+
+# -----------------------------------------------------------------------------
+# DISPLAY SETTINGS
+# -----------------------------------------------------------------------------
+
+# Display level for terminal output during wake
+# Options: full | enhanced | standard | minimal
+# - full:     EVERYTHING - Mental model, narrative, decisions, actions, scores
+# - enhanced: Mental model + work narrative + decisions + next actions
+# - standard: Summary + next actions + recent sessions
+# - minimal:  Just summary and critical next action
+COGSPACE_DISPLAY_LEVEL="full"
+
+# Show continuity score breakdown table
+# Options: true | false
+COGSPACE_DISPLAY_SCORE_TABLE="true"
+
+# -----------------------------------------------------------------------------
+# DASHBOARD SETTINGS
+# -----------------------------------------------------------------------------
+
+# Auto-open dashboard in browser on wake
+# Options: true | false
+COGSPACE_DASHBOARD_AUTO_OPEN="true"
+
+# Browser preference for dashboard
+# Options: auto | safari | chrome | firefox
+# - auto: Detect system default browser
+COGSPACE_BROWSER_PREFERENCE="auto"
+
+# Reuse same browser tab for dashboard (same-tab targeting)
+# Options: true | false
+# When true, looks for existing COGSPACE dashboard tab and refreshes it
+COGSPACE_SAME_TAB_REUSE="true"
+
+# -----------------------------------------------------------------------------
+# DATABASE SETTINGS
+# -----------------------------------------------------------------------------
+
+# Database location (relative to project root)
+# Default: .cogspace/cogspace.db
+COGSPACE_DATABASE_PATH=".cogspace/cogspace.db"
+
+# Schema auto-migration on wake
+# Options: true | false
+COGSPACE_AUTO_MIGRATE="true"
+
+# -----------------------------------------------------------------------------
+# SESSION SETTINGS
+# -----------------------------------------------------------------------------
+
+# Minimum session duration to track (in seconds)
+# Sessions shorter than this are not recorded
+COGSPACE_MIN_SESSION_DURATION="60"
+
+# Maximum recent sessions to display in terminal
+COGSPACE_MAX_RECENT_SESSIONS="5"
+
+# Days to include in "recent sessions" query
+COGSPACE_RECENT_DAYS="30"
+
+# -----------------------------------------------------------------------------
+# CONTEXT ANALYSIS SETTINGS
+# -----------------------------------------------------------------------------
+
+# Enable cognitive state extraction
+COGSPACE_EXTRACT_COGNITIVE_STATE="true"
+
+# Enable decision archaeology
+COGSPACE_EXTRACT_DECISIONS="true"
+
+# Enable tool usage tracking
+COGSPACE_TRACK_TOOL_USAGE="true"
+
+# -----------------------------------------------------------------------------
+# PERFORMANCE SETTINGS
+# -----------------------------------------------------------------------------
+
+# Enable verbose logging (can also use -v flag)
+# Options: true | false
+COGSPACE_VERBOSE="false"
+
+# Timeout for database operations (seconds)
+COGSPACE_DB_TIMEOUT="30"
+
+# -----------------------------------------------------------------------------
+# INTEGRATION SETTINGS
+# -----------------------------------------------------------------------------
+
+# Crystal Palace sync (if available)
+# Options: true | false
+COGSPACE_CRYSTAL_PALACE_SYNC="false"
+
+# GitHub sync for portable mode
+# Options: true | false
+COGSPACE_GITHUB_SYNC="true"
+
+# -----------------------------------------------------------------------------
+# VERSION INFO (do not modify)
+# -----------------------------------------------------------------------------
+COGSPACE_CONFIG_VERSION="51.1.0"

@@ -802,7 +802,7 @@ if ENABLE_POST_PROCESSING:
 STT_PROVIDER=google
 
 # TACTICAL (Google-specific)
-GOOGLE_APPLICATION_CREDENTIALS=/Users/johncarosella/Documents/GitHub/credentials/google-cloud-key.json
+GOOGLE_APPLICATION_CREDENTIALS=/Users/johncarosella/Documents/workspaces/credentials/google-cloud-key.json
 GOOGLE_CLOUD_PROJECT=voice-to-text-dev
 GCS_BUCKET_NAME=voice-to-text-audio-jc
 GOOGLE_MODEL=long

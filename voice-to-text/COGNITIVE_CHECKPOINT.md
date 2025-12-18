@@ -70,7 +70,7 @@
 - **Git Client:** GitHub Desktop (prefers GUI over command line)
 - **Virtual Environment:** Fixed (was 3.9.6, now 3.12, double-parens bug manually resolved)
 - **Google Cloud:** Project created, Speech-to-Text API enabled, credentials at:
-  `/Users/johncarosella/Documents/GitHub/credentials/google-cloud-key.json`
+  `/Users/johncarosella/Documents/workspaces/credentials/google-cloud-key.json`
 
 ---
 

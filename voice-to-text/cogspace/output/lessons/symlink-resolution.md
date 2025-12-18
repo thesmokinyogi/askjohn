@@ -1,0 +1,1 @@
+When calculating PROJECT_ROOT from BASH_SOURCE in scripts that may be invoked via symlink, always resolve the symlink first. The dirname of a symlink returns the symlink's directory, not the target's directory. Use: SCRIPT_PATH=${BASH_SOURCE[0]}; if [[ -L $SCRIPT_PATH ]]; then SCRIPT_PATH=$(readlink $SCRIPT_PATH); fi
